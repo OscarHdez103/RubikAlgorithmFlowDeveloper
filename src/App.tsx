@@ -96,4 +96,70 @@ const [pendingLinkStickers, setPendingLinkStickers] = useState<StickerRef[]>([])
     [selectedDiagram]
   );
 
+  function updateDiagram(mut: (d: Diagram) => void) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      const d = next.diagrams.find(x => x.id === selectedDiagram.id);
+      if (!d) return prev;
+      mut(d);
+      return next;
+    });
+  }
+
+  function updateAlgo(mut: (a: Algorithm) => void) {
+    if (!selectedAlgo) return;
+    setStore(prev => {
+      const next = deepClone(prev);
+      const a = next.algorithms.find(x => x.id === selectedAlgo.id);
+      if (!a) return prev;
+      mut(a);
+      const d = next.diagrams.find(x => x.id === a.diagramId);
+      if (d) a.moves = normalizeMoves(d, a.moves);
+      return next;
+    });
+  }
+
+  function createDiagram() {
+    setStore(prev => {
+      const next = deepClone(prev);
+      const d = defaultDiagram();
+      d.name = `Diagram ${next.diagrams.length + 1}`;
+      next.diagrams.push(d);
+      next.ui.lastDiagramId = d.id;
+      return next;
+    });
+  }
+
+  function deleteDiagram(id: Id) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.diagrams = next.diagrams.filter(d => d.id !== id);
+      next.algorithms = next.algorithms.filter(a => a.diagramId !== id);
+      if (!next.diagrams.length) {
+        const d = defaultDiagram();
+        next.diagrams = [d];
+        next.ui.lastDiagramId = d.id;
+      } else if (next.ui.lastDiagramId === id) {
+        next.ui.lastDiagramId = next.diagrams[0].id;
+      }
+      return next;
+    });
+  }
+
+  function createAlgorithm() {
+    const a: Algorithm = {
+      id: uid(),
+      diagramId: selectedDiagram.id,
+      name: `Algo ${diagramAlgos.length + 1}`,
+      moves: []
+    };
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms.push(a);
+      return next;
+    });
+    setSelectedAlgoId(a.id);
+    setMode("editAlgorithm");
+        }
+
   
