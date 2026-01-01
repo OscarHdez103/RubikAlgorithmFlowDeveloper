@@ -1,246 +1,169 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  Algorithm,
-  Diagram,
-  Id,
-  StickerColor,
-  StickerRef,
-  StoreData
-} from "./types";
-import { COLOR_HEX } from "./types";
-import { exportJson, importJson, loadStore, saveStore } from "./storage";
-import {
-  allSelectableGroups,
-  applyPermutationPower,
-  clamp,
-  composePermutations,
-  defaultDiagram,
-  deepClone,
-  findLinkGroupForSticker,
-  idx,
-  movesToPermutation,
-  normalizeMoves,
-  permutationToMoves,
-  uid,
-  validateClosedLoop
-} from "./utils";
 
-type Mode = "editDiagram" | "editAlgorithm" | "combine";
-type Tool = "paint" | "link" | "move";
+   // For each move, choose a representative member (first sticker) as anchor point for the arrow.
+    const arrows: { from: StickerRef; to: StickerRef; i: number }[] = [];
+    algo.moves.forEach((m, i) => {
+      const fromMembers = idToMembers.get(m.fromGroupId);
+      const toMembers = idToMembers.get(m.toGroupId);
+      if (!fromMembers?.length || !toMembers?.length) return;
+      arrows.push({ from: fromMembers[0], to: toMembers[0], i });
+    });
+    return arrows;
+  }, [algo, diagram]);
 
-export function App() {
-  const [store, setStore] = useState<StoreData>(() => loadStore());
-  const [mode, setMode] = useState<Mode>("editDiagram");
-  const [tool, setTool] = useState<Tool>("paint");
-
-  const [selectedDiagramId, setSelectedDiagramId] = useState<Id>(
-    () => store.ui.lastDiagramId ?? store.diagrams[0].id
-  );
-
-  const selectedDiagram = useMemo(
-    () =>
-      store.diagrams.find(d => d.id === selectedDiagramId) ??
-      store.diagrams[0],
-    [store.diagrams, selectedDiagramId]
-  );
-
-  const diagramAlgos = useMemo(
-    () => store.algorithms.filter(a => a.diagramId === selectedDiagram.id),
-    [store.algorithms, selectedDiagram.id]
-  );
-
-  const [selectedAlgoId, setSelectedAlgoId] = useState<Id | undefined>(
-    () => diagramAlgos[0]?.id
-  );
-
-  const selectedAlgo = useMemo(
-    () => store.algorithms.find(a => a.id === selectedAlgoId),
-    [store.algorithms, selectedAlgoId]
-  );
-
-  const [paintColor, setPaintColor] = useState<StickerColor>("yellow");
-  
-const [pendingLinkStickers, setPendingLinkStickers] = useState<StickerRef[]>([]);
-  const [pendingLinkName, setPendingLinkName] = useState("Edge");
-
-  const [moveFrom, setMoveFrom] = useState<Id | "">("");
-  const [moveTo, setMoveTo] = useState<Id | "">("");
-
-  const [combineA, setCombineA] = useState<Id | "">("");
-  const [combineB, setCombineB] = useState<Id | "">("");
-  const [powerTimes, setPowerTimes] = useState<number>(2);
-  const [combineName, setCombineName] = useState("Combined");
-
+  // Create SVG paths using DOM positions
+  const [paths, setPaths] = useState<{ d: string; head: { x: number; y: number; ang: number }; key: string }[]>([]);
   useEffect(() => {
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.ui.lastDiagramId = selectedDiagramId;
-      return next;
-    });
-  }, [selectedDiagramId]);
+    function recompute() {
+      const out: { d: string; head: { x: number; y: number; ang: number }; key: string }[] = [];
+      for (const a of arrowSegments) {
+        const fromK = `${a.from.gridId}:${a.from.r}:${a.from.c}`;
+        const toK = `${a.to.gridId}:${a.to.r}:${a.to.c}`;
+        const fromEl = stickerEls.current.get(fromK);
+        const toEl = stickerEls.current.get(toK);
+        const fromGridEl = gridEls.current.get(a.from.gridId);
+        const toGridEl = gridEls.current.get(a.to.gridId);
+        if (!fromEl || !toEl || !fromGridEl || !toGridEl) continue;
 
-  useEffect(() => {
-    saveStore(store);
-  }, [store]);
+        // Convert to canvas coordinates: use canvas root rect
+        const canvasEl = document.getElementById("canvas-root");
+        if (!canvasEl) continue;
+        const canvasRect = canvasEl.getBoundingClientRect();
 
-  useEffect(() => {
-    const algos = store.algorithms.filter(a => a.diagramId === selectedDiagram.id);
-    if (!algos.length) setSelectedAlgoId(undefined);
-    else if (!selectedAlgoId || !algos.some(a => a.id === selectedAlgoId)) {
-      setSelectedAlgoId(algos[0].id);
-    }
-  }, [store.algorithms, selectedDiagram.id]);
+        const fr = fromEl.getBoundingClientRect();
+        const tr = toEl.getBoundingClientRect();
 
-  const groups = useMemo(
-    () => allSelectableGroups(selectedDiagram),
-    [selectedDiagram]
-  );
+        const x1 = (fr.left + fr.right) / 2 - canvasRect.left;
+        const y1 = (fr.top + fr.bottom) / 2 - canvasRect.top;
+        const x2 = (tr.left + tr.right) / 2 - canvasRect.left;
+        const y2 = (tr.top + tr.bottom) / 2 - canvasRect.top;
 
-  function updateDiagram(mut: (d: Diagram) => void) {
-    setStore(prev => {
-      const next = deepClone(prev);
-      const d = next.diagrams.find(x => x.id === selectedDiagram.id);
-      if (!d) return prev;
-      mut(d);
-      return next;
-    });
-  }
+        // simple bezier with offset to reduce overlap
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const offset = ((a.i % 5) - 2) * 10; // -20..+20
+        const cx1 = x1 + dx * 0.35 + nx * offset;
+        const cy1 = y1 + dy * 0.35 + ny * offset;
+        const cx2 = x1 + dx * 0.65 + nx * offset;
+        const cy2 = y1 + dy * 0.65 + ny * offset;
 
-  function updateAlgo(mut: (a: Algorithm) => void) {
-    if (!selectedAlgo) return;
-    setStore(prev => {
-      const next = deepClone(prev);
-      const a = next.algorithms.find(x => x.id === selectedAlgo.id);
-      if (!a) return prev;
-      mut(a);
-      const d = next.diagrams.find(x => x.id === a.diagramId);
-      if (d) a.moves = normalizeMoves(d, a.moves);
-      return next;
-    });
-  }
+        const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
 
-  function createDiagram() {
-    setStore(prev => {
-      const next = deepClone(prev);
-      const d = defaultDiagram();
-      d.name = `Diagram ${next.diagrams.length + 1}`;
-      next.diagrams.push(d);
-      next.ui.lastDiagramId = d.id;
-      return next;
-    });
-  }
+        // arrowhead direction based on tangent near end
+        const tx = x2 - cx2;
+        const ty = y2 - cy2;
+        const ang = Math.atan2(ty, tx);
 
-  function deleteDiagram(id: Id) {
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.diagrams = next.diagrams.filter(d => d.id !== id);
-      next.algorithms = next.algorithms.filter(a => a.diagramId !== id);
-      if (!next.diagrams.length) {
-        const d = defaultDiagram();
-        next.diagrams = [d];
-        next.ui.lastDiagramId = d.id;
-      } else if (next.ui.lastDiagramId === id) {
-        next.ui.lastDiagramId = next.diagrams[0].id;
+        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}` });
       }
-      return next;
-    });
-  }
-
-  function createAlgorithm() {
-    const a: Algorithm = {
-      id: uid(),
-      diagramId: selectedDiagram.id,
-      name: `Algo ${diagramAlgos.length + 1}`,
-      moves: []
-    };
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.algorithms.push(a);
-      return next;
-    });
-    setSelectedAlgoId(a.id);
-    setMode("editAlgorithm");
-        }
-function deleteAlgorithm(id: Id) {
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.algorithms = next.algorithms.filter(a => a.id !== id);
-      return next;
-    });
-  }
-
-  function addMove() {
-    if (!selectedAlgo || !moveFrom || !moveTo || moveFrom === moveTo) return;
-    updateAlgo(a => {
-      const hasOut = a.moves.some(m => m.fromGroupId === moveFrom);
-      const hasIn = a.moves.some(m => m.toGroupId === moveTo);
-      if (!hasOut && !hasIn) {
-        a.moves.push({ fromGroupId: moveFrom as Id, toGroupId: moveTo as Id });
-      }
-    });
-  }
-
-  function deleteMove(i: number) {
-    updateAlgo(a => {
-      a.moves.splice(i, 1);
-    });
-  }
-
-  function combineCreate(type: "compose" | "power") {
-    const a = store.algorithms.find(x => x.id === combineA);
-    if (!a) return;
-    if (!validateClosedLoop(a.moves).ok) return;
-
-    let perm = movesToPermutation(a.moves);
-
-    if (type === "power") {
-      perm = applyPermutationPower(perm, clamp(powerTimes, 1, 999));
-    } else {
-      const b = store.algorithms.find(x => x.id === combineB);
-      if (!b || !validateClosedLoop(b.moves).ok) return;
-      perm = composePermutations(perm, movesToPermutation(b.moves));
+      setPaths(out);
     }
 
-    const newAlgo: Algorithm = {
-      id: uid(),
-      diagramId: selectedDiagram.id,
-      name: combineName || "Combined",
-      moves: permutationToMoves(perm)
-    };
-
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.algorithms.push(newAlgo);
-      return next;
-    });
-    setSelectedAlgoId(newAlgo.id);
-    setMode("editAlgorithm");
-        }
-  
-const [jsonText, setJsonText] = useState("");
-  const [importStatus, setImportStatus] = useState("");
-
-  function doExport() {
-    setJsonText(exportJson(store));
-    setImportStatus("Exported.");
-  }
-
-  function doImport() {
-    const parsed = importJson(jsonText);
-    if (!parsed) {
-      setImportStatus("❌ Invalid JSON");
-      return;
-    }
-    setStore(parsed);
-    setSelectedDiagramId(parsed.ui.lastDiagramId ?? parsed.diagrams[0].id);
-    setImportStatus("✅ Imported");
-  }
+    recompute();
+    const onResize = () => recompute();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [arrowSegments, diagram]);
 
   return (
-    <div className="app">
-      {/* Sidebar and canvas are unchanged from original version */}
-      {/* KEEP THIS PART EXACTLY AS PROVIDED IN PREVIOUS MESSAGE */}
-      {/* If you want, I can also split the JSX into subcomponents next */}
+    <div
+      id="canvas-root"
+      className="canvas"
+      onPointerMove={onGridPointerMove}
+      onPointerUp={onGridPointerUp}
+      onPointerCancel={onGridPointerUp}
+    >
+      {/* Arrows layer */}
+      <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <defs>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="1.6" result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {paths.map(p => (
+          <g key={p.key} filter="url(#glow)">
+            <path d={p.d} fill="none" stroke="rgba(106,168,255,0.9)" strokeWidth={2.2} />
+            <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />
+          </g>
+        ))}
+      </svg>
+
+      {diagram.grids.map(g => (
+        <div
+          key={g.id}
+          className="grid"
+          ref={el => setGridEl(g.id, el)}
+          style={{ left: g.x, top: g.y }}
+          onPointerDown={e => onGridPointerDown(e, g.id)}
+        >
+          <div className="gridTitle">
+            <div className="row">
+              <div style={{ fontWeight: 700 }}>{g.name}</div>
+              <span className="badge">{g.w}×{g.h}</span>
+            </div>
+            <div className="row">
+              <span className="badge">{tool === "move" ? "drag" : "tap"}</span>
+            </div>
+          </div>
+
+          <div
+            className="stickerGrid"
+            style={{ gridTemplateColumns: `repeat(${g.w}, 28px)` }}
+          >
+            {Array.from({ length: g.w * g.h }, (_, i) => {
+              const r = Math.floor(i / g.w);
+              const c = i % g.w;
+              const ref: StickerRef = { gridId: g.id, r, c };
+              const color = g.stickers[i];
+              const link = findLinkGroupForSticker(diagram, ref);
+              const key = `${g.id}:${r}:${c}`;
+              const selected = tool === "link" && isPending(ref);
+
+              return (
+                <div
+                  key={key}
+                  ref={el => setStickerEl(key, el)}
+                  className={`sticker ${selected ? "selected" : ""}`}
+                  style={{ background: COLOR_HEX[color] }}
+                  onClick={() => onStickerTap(ref)}
+                  onContextMenu={(e) => {
+                    // long press/right click: remove from links
+                    e.preventDefault();
+                    props.removeStickerFromLinks(ref);
+                  }}
+                  title={link ? `Linked: ${link.name} (right-click/long-press to unlink)` : "Unlinked (tap to paint/link)"}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
-    }
+}
+
+function ArrowHead({ x, y, ang }: { x: number; y: number; ang: number }) {
+  const size = 7;
+  const a1 = ang + Math.PI * 0.8;
+  const a2 = ang - Math.PI * 0.8;
+  const x1 = x + Math.cos(a1) * size;
+  const y1 = y + Math.sin(a1) * size;
+  const x2 = x + Math.cos(a2) * size;
+  const y2 = y + Math.sin(a2) * size;
+
+  return (
+    <path
+      d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`}
+      fill="rgba(106,168,255,0.95)"
+      stroke="rgba(0,0,0,0.25)"
+      strokeWidth={1}
+    />
+  );
+}
