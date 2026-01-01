@@ -1,4 +1,4 @@
-main: Deploy to GitHub Pages
+Chatgpt: Deploy to GitHub Pages
 
 on:
   push:
