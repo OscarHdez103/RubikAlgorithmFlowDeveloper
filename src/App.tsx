@@ -161,5 +161,59 @@ const [pendingLinkStickers, setPendingLinkStickers] = useState<StickerRef[]>([])
     setSelectedAlgoId(a.id);
     setMode("editAlgorithm");
         }
+function deleteAlgorithm(id: Id) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms = next.algorithms.filter(a => a.id !== id);
+      return next;
+    });
+  }
 
+  function addMove() {
+    if (!selectedAlgo || !moveFrom || !moveTo || moveFrom === moveTo) return;
+    updateAlgo(a => {
+      const hasOut = a.moves.some(m => m.fromGroupId === moveFrom);
+      const hasIn = a.moves.some(m => m.toGroupId === moveTo);
+      if (!hasOut && !hasIn) {
+        a.moves.push({ fromGroupId: moveFrom as Id, toGroupId: moveTo as Id });
+      }
+    });
+  }
+
+  function deleteMove(i: number) {
+    updateAlgo(a => {
+      a.moves.splice(i, 1);
+    });
+  }
+
+  function combineCreate(type: "compose" | "power") {
+    const a = store.algorithms.find(x => x.id === combineA);
+    if (!a) return;
+    if (!validateClosedLoop(a.moves).ok) return;
+
+    let perm = movesToPermutation(a.moves);
+
+    if (type === "power") {
+      perm = applyPermutationPower(perm, clamp(powerTimes, 1, 999));
+    } else {
+      const b = store.algorithms.find(x => x.id === combineB);
+      if (!b || !validateClosedLoop(b.moves).ok) return;
+      perm = composePermutations(perm, movesToPermutation(b.moves));
+    }
+
+    const newAlgo: Algorithm = {
+      id: uid(),
+      diagramId: selectedDiagram.id,
+      name: combineName || "Combined",
+      moves: permutationToMoves(perm)
+    };
+
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms.push(newAlgo);
+      return next;
+    });
+    setSelectedAlgoId(newAlgo.id);
+    setMode("editAlgorithm");
+        }
   
