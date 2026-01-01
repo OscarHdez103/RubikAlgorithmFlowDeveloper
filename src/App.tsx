@@ -60,3 +60,40 @@ export function App() {
 
   const [paintColor, setPaintColor] = useState<StickerColor>("yellow");
   
+const [pendingLinkStickers, setPendingLinkStickers] = useState<StickerRef[]>([]);
+  const [pendingLinkName, setPendingLinkName] = useState("Edge");
+
+  const [moveFrom, setMoveFrom] = useState<Id | "">("");
+  const [moveTo, setMoveTo] = useState<Id | "">("");
+
+  const [combineA, setCombineA] = useState<Id | "">("");
+  const [combineB, setCombineB] = useState<Id | "">("");
+  const [powerTimes, setPowerTimes] = useState<number>(2);
+  const [combineName, setCombineName] = useState("Combined");
+
+  useEffect(() => {
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.ui.lastDiagramId = selectedDiagramId;
+      return next;
+    });
+  }, [selectedDiagramId]);
+
+  useEffect(() => {
+    saveStore(store);
+  }, [store]);
+
+  useEffect(() => {
+    const algos = store.algorithms.filter(a => a.diagramId === selectedDiagram.id);
+    if (!algos.length) setSelectedAlgoId(undefined);
+    else if (!selectedAlgoId || !algos.some(a => a.id === selectedAlgoId)) {
+      setSelectedAlgoId(algos[0].id);
+    }
+  }, [store.algorithms, selectedDiagram.id]);
+
+  const groups = useMemo(
+    () => allSelectableGroups(selectedDiagram),
+    [selectedDiagram]
+  );
+
+  
