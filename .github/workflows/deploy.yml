@@ -1,8 +1,8 @@
-Chatgpt: Deploy to GitHub Pages
+main: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ "Chatgpt" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
