@@ -54,7 +54,15 @@ export function App() {
   const [moveFrom, setMoveFrom] = useState<Id | "">("");
   const [moveTo, setMoveTo] = useState<Id | "">("");
 
-  
+  // New Combine model
+type CombineItem = {
+  algoId: Id;
+  power: number;
+};
+
+const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
+const [combinePick, setCombinePick] = useState<Id | "">("");
+const [combineName, setCombineName] = useState("Combined");
 
   // Persist
   useEffect(() => {
