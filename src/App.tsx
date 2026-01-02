@@ -706,12 +706,19 @@ function remapPermutation(p: Map<Id, Id>, remap: Record<string, Id | "">) {
 
           <div className="row" style={{ marginTop: 8 }}>
             <button
-              className="btn"
-              onClick={() => setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, showRemap: !x.showRemap } : x))}
-              disabled={!it.algoId}
-            >
-              {it.showRemap ? "Hide remap" : "Remap (move/flip)"}
-            </button>
+  className="btn"
+  onClick={() => {
+    setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, showRemap: !x.showRemap } : x));
+    // if we're closing this remap panel, stop picking
+    if (it.showRemap && remapPickStep === i) {
+      setRemapPickStep(null);
+      setRemapPickFrom("");
+    }
+  }}
+  disabled={!it.algoId}
+>
+  {it.showRemap ? "Hide remap" : "Remap (move/flip)"}
+</button>
 
             <button
               className="btn"
