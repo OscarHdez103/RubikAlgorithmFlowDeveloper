@@ -935,6 +935,9 @@ function onStickerTap(ref: StickerRef) {
               const key = `${g.id}:${r}:${c}`;
               const selected = tool === "link" && isPending(ref);
 
+const gid = groupIdForSticker(diagram, ref);
+const isAlgoFrom = props.mode === "editAlgorithm" && props.moveFrom && props.moveFrom === gid;
+
               return (
                 <div
                   key={key}
