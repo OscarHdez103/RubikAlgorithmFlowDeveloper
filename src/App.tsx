@@ -736,6 +736,35 @@ function remapPermutation(p: Map<Id, Id>, remap: Record<string, Id | "">) {
                 Remap the *groups used by this algorithm instance* to other groups (this is how you “move/flip” it without duplicating).
               </div>
 
+<div className="row" style={{ marginTop: 8 }}>
+  <button
+    className={`btn ${remapPickStep === i ? "primary" : ""}`}
+    onClick={() => {
+      if (remapPickStep === i) {
+        setRemapPickStep(null);
+        setRemapPickFrom("");
+      } else {
+        setRemapPickStep(i);
+        setRemapPickFrom("");
+      }
+    }}
+  >
+    {remapPickStep === i ? "Picking on canvas…" : "Pick remap on canvas"}
+  </button>
+
+  <span className="badge">
+    {remapPickStep === i
+      ? (remapPickFrom ? "Now tap destination" : "Tap source")
+      : "off"}
+  </span>
+</div>
+
+{remapPickStep === i && (
+  <div className="muted">
+    Tap a **source** sticker/group, then tap a **destination** sticker/group. This fills the mapping for this step only.
+  </div>
+)}
+              
               {(() => {
                 const algo = store.algorithms.find(a => a.id === it.algoId);
                 if (!algo) return null;
