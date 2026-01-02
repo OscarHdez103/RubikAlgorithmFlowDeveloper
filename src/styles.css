@@ -139,3 +139,18 @@ a { color: var(--accent); }
 .statusOk { color: var(--ok); }
 .statusBad { color: var(--danger); }
 .small { font-size: 12px; }
+/* --- Arrow overlay (always on top) --- */
+.svgOverlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 999;        /* higher than grids */
+  pointer-events: none; /* clicks go through to stickers */
+}
+
+/* Make sure grids are below overlay */
+.grid {
+  z-index: 10;
+}
