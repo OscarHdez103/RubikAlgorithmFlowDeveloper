@@ -290,7 +290,22 @@ const combinePreview = useMemo(() => {
     });
   }
 
-  
+  function invertPermutation(p: Map<Id, Id>) {
+  const inv = new Map<Id, Id>();
+  for (const [k, v] of p.entries()) inv.set(v, k);
+  return inv;
+}
+
+function remapPermutation(p: Map<Id, Id>, remap: Record<string, Id | "">) {
+  // remap old ids -> new ids (only for this composition item)
+  const out = new Map<Id, Id>();
+  for (const [k, v] of p.entries()) {
+    const nk = (remap[k] && remap[k] !== "") ? (remap[k] as Id) : k;
+    const nv = (remap[v] && remap[v] !== "") ? (remap[v] as Id) : v;
+    out.set(nk, nv);
+  }
+  return out;
+       }
 
   // Export / Import
   const [jsonText, setJsonText] = useState("");
