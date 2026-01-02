@@ -20,7 +20,7 @@ import {
 
 type Mode = "editDiagram" | "editAlgorithm" | "combine";
 
-type Tool = "paint" | "link" | "move";
+type Tool = "paint" | "link";
 
 export function App() {
   const [store, setStore] = useState<StoreData>(() => loadStore());
