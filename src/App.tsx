@@ -69,7 +69,6 @@ type CombineItem = {
 };
 
 const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
-const [combinePick, setCombinePick] = useState<Id | "">("");
 const [combineName, setCombineName] = useState("Combined");
 
   // Persist
