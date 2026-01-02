@@ -1,4 +1,227 @@
-function doImport() {
+
+  // Keep selected algo valid
+  useEffect(() => {
+    const algos = store.algorithms.filter(a => a.diagramId === selectedDiagram.id);
+    if (!algos.length) setSelectedAlgoId(undefined);
+    else if (!selectedAlgoId || !algos.some(a => a.id === selectedAlgoId)) setSelectedAlgoId(algos[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.algorithms, selectedDiagram.id]);
+
+  const groups = useMemo(() => allSelectableGroups(selectedDiagram), [selectedDiagram]);
+
+  function updateDiagram(mut: (d: Diagram) => void) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      const d = next.diagrams.find(x => x.id === selectedDiagram.id);
+      if (!d) return prev;
+      mut(d);
+      return next;
+    });
+  }
+
+  function updateAlgo(mut: (a: Algorithm) => void) {
+    if (!selectedAlgo) return;
+    setStore(prev => {
+      const next = deepClone(prev);
+      const a = next.algorithms.find(x => x.id === selectedAlgo.id);
+      if (!a) return prev;
+      mut(a);
+      // keep moves valid if diagram changed
+      const d = next.diagrams.find(x => x.id === a.diagramId);
+      if (d) a.moves = normalizeMoves(d, a.moves);
+      return next;
+    });
+  }
+
+  function createDiagram() {
+    setStore(prev => {
+      const next = deepClone(prev);
+      const d = defaultDiagram();
+      d.name = `Diagram ${next.diagrams.length + 1}`;
+      next.diagrams.push(d);
+      next.ui.lastDiagramId = d.id;
+      return next;
+    });
+    // selectedDiagramId will update via ui.lastDiagramId effect, but we set directly too:
+    const nextId = store.diagrams.length ? `pending` : `pending`;
+    void nextId;
+    setSelectedDiagramId(prev => prev); // no-op; selection will change after store updates
+  }
+
+  function deleteDiagram(id: Id) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.diagrams = next.diagrams.filter(d => d.id !== id);
+      next.algorithms = next.algorithms.filter(a => a.diagramId !== id);
+      if (!next.diagrams.length) {
+        const d = defaultDiagram();
+        next.diagrams = [d];
+        next.ui.lastDiagramId = d.id;
+      } else if (next.ui.lastDiagramId === id) {
+        next.ui.lastDiagramId = next.diagrams[0].id;
+      }
+      return next;
+    });
+    if (selectedDiagramId === id) {
+      const fallback = store.diagrams.find(d => d.id !== id)?.id;
+      if (fallback) setSelectedDiagramId(fallback);
+    }
+  }
+
+  function createAlgorithm() {
+    const a: Algorithm = {
+      id: uid(),
+      diagramId: selectedDiagram.id,
+      name: `Algo ${diagramAlgos.length + 1}`,
+      moves: []
+    };
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms.push(a);
+      return next;
+    });
+    setSelectedAlgoId(a.id);
+    setMode("editAlgorithm");
+  }
+
+  function deleteAlgorithm(id: Id) {
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms = next.algorithms.filter(a => a.id !== id);
+      return next;
+    });
+    if (selectedAlgoId === id) setSelectedAlgoId(undefined);
+  }
+
+  function addGrid() {
+    updateDiagram(d => {
+      const count = d.grids.length + 1;
+      const w = 3, h = 3;
+      d.grids.push({
+        id: uid(),
+        name: `Grid ${count}`,
+        x: 60 + 30 * count,
+        y: 60 + 30 * count,
+        w, h,
+        stickers: Array.from({ length: w * h }, () => "gray")
+      });
+    });
+  }
+
+  function deleteGrid(gridId: Id) {
+    updateDiagram(d => {
+      d.grids = d.grids.filter(g => g.id !== gridId);
+      // remove references from links
+      for (const lg of d.links) lg.stickers = lg.stickers.filter(s => s.gridId !== gridId);
+      d.links = d.links.filter(lg => lg.stickers.length >= 2);
+    });
+  }
+
+  function createLinkGroup() {
+    if (pendingLinkStickers.length < 2) return;
+    updateDiagram(d => {
+      // remove these stickers from any existing link groups first
+      const keys = new Set(pendingLinkStickers.map(s => `${s.gridId}:${s.r}:${s.c}`));
+      for (const lg of d.links) {
+        lg.stickers = lg.stickers.filter(s => !keys.has(`${s.gridId}:${s.r}:${s.c}`));
+      }
+      d.links = d.links.filter(lg => lg.stickers.length >= 2);
+
+      d.links.push({
+        id: uid(),
+        name: pendingLinkName.trim() || "Link",
+        stickers: deepClone(pendingLinkStickers)
+      });
+    });
+    setPendingLinkStickers([]);
+  }
+
+  function removeStickerFromLinks(ref: StickerRef) {
+    updateDiagram(d => {
+      const k = `${ref.gridId}:${ref.r}:${ref.c}`;
+      for (const lg of d.links) {
+        lg.stickers = lg.stickers.filter(s => `${s.gridId}:${s.r}:${s.c}` !== k);
+      }
+      d.links = d.links.filter(lg => lg.stickers.length >= 2);
+    });
+  }
+
+  function addMove() {
+    if (!selectedAlgo) return;
+    if (!moveFrom || !moveTo) return;
+    if (moveFrom === moveTo) return;
+
+    updateAlgo(a => {
+      // enforce at most one outgoing + incoming per group
+      const hasOut = a.moves.some(m => m.fromGroupId === moveFrom);
+      const hasIn = a.moves.some(m => m.toGroupId === moveTo);
+      if (hasOut || hasIn) return;
+
+      a.moves.push({ fromGroupId: moveFrom as Id, toGroupId: moveTo as Id });
+    });
+  }
+
+  function deleteMove(i: number) {
+    updateAlgo(a => {
+      a.moves.splice(i, 1);
+    });
+  }
+
+  function combineCreate(type: "compose" | "power") {
+    // Build permutation from algos (must be closed loops)
+    const a = store.algorithms.find(x => x.id === combineA);
+    if (!a) return;
+
+    const diagram = store.diagrams.find(d => d.id === selectedDiagram.id)!;
+
+    const valA = validateClosedLoop(a.moves);
+    if (!valA.ok) return;
+
+    let permA = movesToPermutation(a.moves);
+
+    let permOut = new Map<Id, Id>();
+
+    if (type === "power") {
+      const times = clamp(Math.floor(powerTimes), 1, 999);
+      permOut = applyPermutationPower(permA, times);
+    } else {
+      const b = store.algorithms.find(x => x.id === combineB);
+      if (!b) return;
+      const valB = validateClosedLoop(b.moves);
+      if (!valB.ok) return;
+      const permB = movesToPermutation(b.moves);
+      // compose: first B then A
+      permOut = composePermutations(permA, permB);
+    }
+
+    const outMoves = permutationToMoves(permOut);
+
+    const newAlgo: Algorithm = {
+      id: uid(),
+      diagramId: diagram.id,
+      name: combineName.trim() || "Combined",
+      moves: outMoves
+    };
+
+    setStore(prev => {
+      const next = deepClone(prev);
+      next.algorithms.push(newAlgo);
+      return next;
+    });
+    setSelectedAlgoId(newAlgo.id);
+    setMode("editAlgorithm");
+  }
+
+  // Export / Import
+  const [jsonText, setJsonText] = useState("");
+  const [importStatus, setImportStatus] = useState<string>("");
+
+  function doExport() {
+    setJsonText(exportJson(store));
+    setImportStatus("Exported current data to the text box below.");
+  }
+
+  function doImport() {
     const parsed = importJson(jsonText);
     if (!parsed) {
       setImportStatus("❌ Import failed: invalid JSON structure.");
