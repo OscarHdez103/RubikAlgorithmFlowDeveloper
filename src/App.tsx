@@ -62,6 +62,8 @@ export function App() {
   const [moveFrom, setMoveFrom] = useState<Id | "">("");
   const [moveTo, setMoveTo] = useState<Id | "">("");
 
+  const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
+const [combineName, setCombineName] = useState("Combined");
 
   // Persist
   useEffect(() => {
