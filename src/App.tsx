@@ -634,15 +634,27 @@ export function App() {
 
       <div className="canvasWrap">
         <DiagramCanvas
-          diagram={selectedDiagram}
-          algo={mode === "editAlgorithm" ? selectedAlgo : undefined}
-          tool={tool}
-          paintColor={paintColor}
-          pendingLinkStickers={pendingLinkStickers}
-          setPendingLinkStickers={setPendingLinkStickers}
-          updateDiagram={updateDiagram}
-          removeStickerFromLinks={removeStickerFromLinks}
-        />
+  diagram={selectedDiagram}
+  algo={mode === "editAlgorithm" ? selectedAlgo : undefined}
+  mode={mode}
+  tool={tool}
+  paintColor={paintColor}
+  pendingLinkStickers={pendingLinkStickers}
+  setPendingLinkStickers={setPendingLinkStickers}
+  updateDiagram={updateDiagram}
+  removeStickerFromLinks={removeStickerFromLinks}
+  moveFrom={moveFrom}
+  setMoveFrom={setMoveFrom}
+  addMoveByGroup={(fromId, toId) => {
+    if (!selectedAlgo) return;
+    updateAlgo(a => {
+      const hasOut = a.moves.some(m => m.fromGroupId === fromId);
+      const hasIn = a.moves.some(m => m.toGroupId === toId);
+      if (hasOut || hasIn) return;
+      a.moves.push({ fromGroupId: fromId, toGroupId: toId });
+    });
+  }}
+/>
       </div>
     </div>
   );
