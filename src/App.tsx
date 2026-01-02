@@ -764,18 +764,19 @@ function onStickerTap(ref: StickerRef) {
 }
 
   function onGridPointerDown(e: React.PointerEvent, gridId: Id) {
-    if (tool !== "move") return;
-    const g = diagram.grids.find(x => x.id === gridId);
-    if (!g) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = {
-      gridId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: g.x,
-      origY: g.y,
-      pointerId: e.pointerId
-    };
+  const g = diagram.grids.find(x => x.id === gridId);
+  if (!g) return;
+
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+  dragRef.current = {
+    gridId,
+    startX: e.clientX,
+    startY: e.clientY,
+    origX: g.x,
+    origY: g.y,
+    pointerId: e.pointerId
+  };
   }
 
   function onGridPointerMove(e: React.PointerEvent) {
