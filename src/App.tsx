@@ -95,6 +95,44 @@ const [combineName, setCombineName] = useState("Combined");
 
   const groups = useMemo(() => allSelectableGroups(selectedDiagram), [selectedDiagram]);
 
+const combinePreview = useMemo(() => {
+  if (!combineItems.length) return { ok: true, moves: [] as { fromGroupId: Id; toGroupId: Id }[], error: "" };
+
+  // Compose in order: apply item[0], then item[1], ...
+  // So result = p_last ∘ ... ∘ p2 ∘ p1  (we implement via composePermutations(p, result))
+  let result = new Map<Id, Id>(); // identity
+
+  for (let i = 0; i < combineItems.length; i++) {
+    const item = combineItems[i];
+    if (!item.algoId) return { ok: false, moves: [], error: `Item ${i + 1}: choose an algorithm.` };
+
+    const algo = store.algorithms.find(a => a.id === item.algoId);
+    if (!algo) return { ok: false, moves: [], error: `Item ${i + 1}: algorithm not found.` };
+
+    const v = validateClosedLoop(algo.moves);
+    if (!v.ok) return { ok: false, moves: [], error: `Item ${i + 1}: "${algo.name}" is not a closed loop.` };
+
+    let p = movesToPermutation(algo.moves);
+
+    // reverse/invert
+    if (item.invert) p = invertPermutation(p);
+
+    // power (allow empty while typing)
+    const pow = clamp(Math.floor(Number(item.powText || "1")), 1, 999);
+    p = applyPermutationPower(p, pow);
+
+    // remap (move/flip) – only affects this instance
+    p = remapPermutation(p, item.remap);
+
+    // compose: first result, then p? We want apply earlier items first.
+    // composePermutations(a,b) returns a∘b (first b then a).
+    // So to apply p after current result, do: result = p ∘ result
+    result = composePermutations(p, result);
+  }
+
+  return { ok: true, moves: permutationToMoves(result), error: "" };
+}, [combineItems, store.algorithms]);
+  
   function updateDiagram(mut: (d: Diagram) => void) {
     setStore(prev => {
       const next = deepClone(prev);
