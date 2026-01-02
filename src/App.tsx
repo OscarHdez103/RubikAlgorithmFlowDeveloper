@@ -556,55 +556,124 @@ const combinePreview = useMemo(() => {
         )}
 
         {mode === "combine" && (
-          <div className="card">
-            <div style={{ fontWeight: 700 }}>Combine</div>
-            <div className="muted">
-              Only “closed loop” algorithms can be combined safely.
+  <div className="card">
+    <div className="row spread">
+      <div style={{ fontWeight: 700 }}>Combine Algorithms</div>
+      <span className={`badge ${combinePreview.ok ? "statusOk" : "statusBad"}`}>
+        {combinePreview.ok ? "valid" : "invalid"}
+      </span>
+    </div>
+
+    <div className="col" style={{ marginTop: 8 }}>
+      <input
+        className="field"
+        value={combineName}
+        onChange={e => setCombineName(e.target.value)}
+        placeholder="New algorithm name"
+      />
+    </div>
+
+    <div className="row" style={{ marginTop: 8 }}>
+      <select
+        className="field"
+        value={combinePick}
+        onChange={e => setCombinePick(e.target.value as Id)}
+      >
+        <option value="">Add algorithm…</option>
+        {diagramAlgos.map(a => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      <button
+        className="btn primary"
+        onClick={() => {
+          if (!combinePick) return;
+          setCombineItems(items => [...items, { algoId: combinePick, power: 1 }]);
+          setCombinePick("");
+        }}
+      >
+        Add
+      </button>
+    </div>
+
+    <div className="col" style={{ marginTop: 10 }}>
+      {combineItems.map((item, i) => {
+        const algo = store.algorithms.find(a => a.id === item.algoId);
+        return (
+          <div key={i} className="row spread" style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 8 }}>
+            <div className="col" style={{ flex: 1 }}>
+              <strong>{algo?.name}</strong>
+              <div className="row">
+                <span className="muted small">power</span>
+                <input
+                  type="number"
+                  min={1}
+                  className="field"
+                  style={{ width: 80 }}
+                  value={item.power}
+                  onChange={e => {
+                    const p = clamp(Number(e.target.value), 1, 999);
+                    setCombineItems(list =>
+                      list.map((x, j) => j === i ? { ...x, power: p } : x)
+                    );
+                  }}
+                />
+              </div>
             </div>
 
-            <div className="col" style={{ marginTop: 10 }}>
-              <div className="row">
-                <input className="field" value={combineName} onChange={e => setCombineName(e.target.value)} placeholder="New algorithm name" />
-              </div>
-
-              <div className="col" style={{ marginTop: 8 }}>
-                <div className="muted">Power (apply an algorithm N times)</div>
-                <select className="field" value={combineA} onChange={e => setCombineA(e.target.value as any)}>
-                  <option value="">Choose algorithm…</option>
-                  {diagramAlgos.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-                <div className="row">
-                  <input
-                    className="field"
-                    type="number"
-                    min={1}
-                    max={999}
-                    value={powerTimes}
-                    onChange={e => setPowerTimes(Number(e.target.value))}
-                  />
-                  <button className="btn primary" onClick={() => combineCreate("power")}>Create A^N</button>
-                </div>
-              </div>
-
-              <div className="col" style={{ marginTop: 12 }}>
-                <div className="muted">Compose (A ∘ B = first B then A)</div>
-                <select className="field" value={combineA} onChange={e => setCombineA(e.target.value as any)}>
-                  <option value="">Choose A…</option>
-                  {diagramAlgos.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-                <select className="field" value={combineB} onChange={e => setCombineB(e.target.value as any)}>
-                  <option value="">Choose B…</option>
-                  {diagramAlgos.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-                <button className="btn primary" onClick={() => combineCreate("compose")}>Create A∘B</button>
-              </div>
-
-              <div className="muted" style={{ marginTop: 10 }}>
-                If buttons do nothing: the selected algorithm(s) are not closed loops (some moved group missing incoming/outgoing).
-              </div>
+            <div className="row">
+              <button
+                className="btn"
+                onClick={() => setCombineItems(list => list.filter((_, j) => j !== i))}
+              >
+                Remove
+              </button>
             </div>
           </div>
-        )}
+        );
+      })}
+    </div>
+
+    {!combinePreview.ok && (
+      <div className="muted" style={{ marginTop: 8 }}>
+        {combinePreview.error}
+      </div>
+    )}
+
+    <div className="row" style={{ marginTop: 12 }}>
+      <button
+        className="btn primary"
+        disabled={!combinePreview.ok}
+        onClick={() => {
+          const newAlgo: Algorithm = {
+            id: uid(),
+            diagramId: selectedDiagram.id,
+            name: combineName || "Combined",
+            moves: combinePreview.moves
+          };
+
+          setStore(prev => {
+            const next = deepClone(prev);
+            next.algorithms.push(newAlgo);
+            return next;
+          });
+
+          setSelectedAlgoId(newAlgo.id);
+          setMode("editAlgorithm");
+        }}
+      >
+        Save algorithm
+      </button>
+
+      <button
+        className="btn"
+        onClick={() => setCombineItems([])}
+      >
+        Clear
+      </button>
+    </div>
+  </div>
+)}
 
         <div className="card">
           <div className="row spread">
