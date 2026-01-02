@@ -294,6 +294,15 @@ const combinePreview = useMemo(() => {
   return inv;
 }
 
+function setRemapForStep(stepIndex: number, fromId: Id, toId: Id) {
+  setCombineItems(prev =>
+    prev.map((x, idx) => {
+      if (idx !== stepIndex) return x;
+      return { ...x, remap: { ...x.remap, [fromId]: toId } };
+    })
+  );
+}
+  
 function remapPermutation(p: Map<Id, Id>, remap: Record<string, Id | "">) {
   // remap old ids -> new ids (only for this composition item)
   const out = new Map<Id, Id>();
