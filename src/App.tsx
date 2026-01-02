@@ -22,6 +22,14 @@ type Mode = "editDiagram" | "editAlgorithm" | "combine";
 
 type Tool = "paint" | "link";
 
+type CombineItem = {
+  algoId: Id | "";
+  powText: string;          // allow "" while editing
+  invert: boolean;          // reverse (inverse)
+  remap: Record<string, Id | "">; // oldGroupId -> newGroupId
+  showRemap: boolean;
+};
+
 export function App() {
   const [store, setStore] = useState<StoreData>(() => loadStore());
   const [mode, setMode] = useState<Mode>("editDiagram");
