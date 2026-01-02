@@ -837,7 +837,7 @@ function DiagramCanvas(props: CanvasProps) {
       onPointerCancel={onGridPointerUp}
     >
       {/* Arrows layer */}
-      <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      <svg className="svgOverlay">
         <defs>
           <filter id="glow">
             <feGaussianBlur stdDeviation="1.6" result="coloredBlur" />
