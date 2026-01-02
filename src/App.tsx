@@ -1,4 +1,151 @@
-className="btn" onClick={() => updateDiagram(d => {
+function doImport() {
+    const parsed = importJson(jsonText);
+    if (!parsed) {
+      setImportStatus("❌ Import failed: invalid JSON structure.");
+      return;
+    }
+    setStore(parsed);
+    setSelectedDiagramId(parsed.ui.lastDiagramId ?? parsed.diagrams[0].id);
+    setImportStatus("✅ Imported JSON into app storage.");
+  }
+
+  return (
+    <div className="app">
+      <div className="sidebar">
+        <div className="header">
+          <div className="col">
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Cube Diagram Tool</div>
+            <div className="muted">Diagrams • Links • Algorithms • Combine</div>
+          </div>
+          <div className="row">
+            <button className={`btn ${mode === "editDiagram" ? "primary" : ""}`} onClick={() => setMode("editDiagram")}>Diagram</button>
+            <button className={`btn ${mode === "editAlgorithm" ? "primary" : ""}`} onClick={() => setMode("editAlgorithm")}>Algorithm</button>
+            <button className={`btn ${mode === "combine" ? "primary" : ""}`} onClick={() => setMode("combine")}>Combine</button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="row spread">
+            <div className="col" style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700 }}>Diagram</div>
+              <select
+                className="field"
+                value={selectedDiagramId}
+                onChange={e => {
+                  setSelectedDiagramId(e.target.value);
+                  setPendingLinkStickers([]);
+                }}
+              >
+                {store.diagrams.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col" style={{ alignItems: "flex-end" }}>
+              <button className="btn primary" onClick={createDiagram}>+ New</button>
+              <button className="btn danger" onClick={() => deleteDiagram(selectedDiagram.id)}>Delete</button>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 8 }}>
+            <input
+              className="field"
+              value={selectedDiagram.name}
+              onChange={e => updateDiagram(d => { d.name = e.target.value; })}
+              placeholder="Diagram name"
+            />
+          </div>
+
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" onClick={addGrid}>+ Grid</button>
+            <span className="badge">{selectedDiagram.grids.length} grids</span>
+            <span className="badge">{selectedDiagram.links.length} link groups</span>
+          </div>
+        </div>
+
+        {mode === "editDiagram" && (
+          <div className="card">
+            <div className="row spread">
+              <div style={{ fontWeight: 700 }}>Tools</div>
+              <span className="badge">Tap stickers</span>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className={`btn ${tool === "paint" ? "primary" : ""}`} onClick={() => setTool("paint")}>Paint</button>
+              <button className={`btn ${tool === "link" ? "primary" : ""}`} onClick={() => setTool("link")}>Link</button>
+              <button className={`btn ${tool === "move" ? "primary" : ""}`} onClick={() => setTool("move")}>Move grids</button>
+            </div>
+
+            {tool === "paint" && (
+              <div className="col" style={{ marginTop: 10 }}>
+                <div className="muted">Paint color</div>
+                <div className="row">
+                  {Object.keys(COLOR_HEX).map(k => {
+                    const c = k as StickerColor;
+                    return (
+                      <button
+                        key={c}
+                        className={`btn ${paintColor === c ? "primary" : ""}`}
+                        onClick={() => setPaintColor(c)}
+                        title={c}
+                        style={{ padding: 8 }}
+                      >
+                        <span style={{
+                          display: "inline-block",
+                          width: 16, height: 16,
+                          borderRadius: 6,
+                          background: COLOR_HEX[c],
+                          border: "1px solid rgba(255,255,255,0.2)"
+                        }} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tool === "link" && (
+              <div className="col" style={{ marginTop: 10 }}>
+                <div className="muted">
+                  Tap stickers to select. Then create a link group. Selected: {pendingLinkStickers.length}
+                </div>
+                <input
+                  className="field"
+                  value={pendingLinkName}
+                  onChange={e => setPendingLinkName(e.target.value)}
+                  placeholder="Link group name (e.g., Edge UF)"
+                />
+                <div className="row">
+                  <button className="btn primary" onClick={createLinkGroup} disabled={pendingLinkStickers.length < 2}>
+                    Create link group
+                  </button>
+                  <button className="btn" onClick={() => setPendingLinkStickers([])}>Clear selection</button>
+                </div>
+                <div className="muted">
+                  Tip: If you re-link a sticker, it is removed from previous link groups automatically.
+                </div>
+              </div>
+            )}
+
+            <div className="col" style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700 }}>Grids</div>
+              {selectedDiagram.grids.map(g => (
+                <div key={g.id} className="row spread" style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 8 }}>
+                  <div className="col" style={{ flex: 1 }}>
+                    <input
+                      className="field"
+                      value={g.name}
+                      onChange={e => updateDiagram(d => {
+                        const gg = d.grids.find(x => x.id === g.id)!;
+                        gg.name = e.target.value;
+                      })}
+                    />
+                    <div className="row">
+                      <span className="badge">{g.w}×{g.h}</span>
+                      <span className="badge">x:{Math.round(g.x)} y:{Math.round(g.y)}</span>
+                    </div>
+                    <div className="row">
+                      <span className="muted small">Resize:</span>
+                      <button className="btn" onClick={() => updateDiagram(d => {
                         const gg = d.grids.find(x => x.id === g.id)!;
                         gg.w = clamp(gg.w - 1, 1, 12);
                         gg.stickers = Array.from({ length: gg.w * gg.h }, (_, i) => gg.stickers[i] ?? "gray");
