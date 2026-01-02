@@ -98,6 +98,43 @@ const [combineName, setCombineName] = useState("Combined");
     });
   }
 
+const combinePreview = useMemo(() => {
+  if (combineItems.length === 0) {
+    return { ok: true, moves: [] as Algorithm["moves"], error: "" };
+  }
+
+  let composed = new Map<Id, Id>(); // identity permutation
+
+  for (const item of combineItems) {
+    const algo = store.algorithms.find(a => a.id === item.algoId);
+    if (!algo) {
+      return { ok: false, moves: [], error: "Missing algorithm." };
+    }
+
+    const valid = validateClosedLoop(algo.moves);
+    if (!valid.ok) {
+      return {
+        ok: false,
+        moves: [],
+        error: `Algorithm "${algo.name}" is not a closed loop`
+      };
+    }
+
+    const basePerm = movesToPermutation(algo.moves);
+    const pow = clamp(Math.floor(item.power), 1, 999);
+    const powered = applyPermutationPower(basePerm, pow);
+
+    // compose: apply previous result first, then this
+    composed = composePermutations(powered, composed);
+  }
+
+  return {
+    ok: true,
+    moves: permutationToMoves(composed),
+    error: ""
+  };
+}, [combineItems, store.algorithms]);
+  
   function updateAlgo(mut: (a: Algorithm) => void) {
     if (!selectedAlgo) return;
     setStore(prev => {
