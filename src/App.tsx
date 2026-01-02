@@ -942,7 +942,7 @@ const isAlgoFrom = props.mode === "editAlgorithm" && props.moveFrom && props.mov
                 <div
                   key={key}
                   ref={el => setStickerEl(key, el)}
-                  className={`sticker ${selected ? "selected" : ""}`}
+                  className={`sticker ${selected ? "selected" : ""} ${isAlgoFrom ? "selected" : ""}`}
                   style={{ background: COLOR_HEX[color] }}
                   onClick={() => onStickerTap(ref)}
                   onContextMenu={(e) => {
