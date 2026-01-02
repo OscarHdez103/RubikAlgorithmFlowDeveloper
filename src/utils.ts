@@ -133,7 +133,7 @@ export function deepClone<T>(x: T): T {
 }
 
 export function defaultGrid(name: string, w: number, h: number, x: number, y: number): Grid {
-  const stickers = Array.from({ length: w * h }, () => "gray");
+  const stickers = Array.from({ length: w * h }, () => "gray" as StickerColor);
   return { id: uid(), name, w, h, x, y, stickers };
 }
 
