@@ -918,7 +918,7 @@ function onStickerTap(ref: StickerRef) {
               <span className="badge">{g.w}×{g.h}</span>
             </div>
             <div className="row">
-              <span className="badge">{tool === "move" ? "drag" : "tap"}</span>
+              
             </div>
           </div>
 
