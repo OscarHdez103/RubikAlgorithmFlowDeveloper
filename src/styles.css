@@ -154,3 +154,10 @@ a { color: var(--accent); }
 .grid {
   z-index: 10;
 }
+
+.gridTitle {
+  cursor: grab;
+}
+.gridTitle:active {
+  cursor: grabbing;
+                   }
