@@ -943,10 +943,9 @@ function onStickerTap(ref: StickerRef) {
                   style={{ background: COLOR_HEX[color] }}
                   onClick={() => onStickerTap(ref)}
                   onContextMenu={(e) => {
-                    // long press/right click: remove from links
-                    e.preventDefault();
-                    props.removeStickerFromLinks(ref);
-                  }}
+  e.preventDefault();
+  if (props.mode === "editDiagram") props.removeStickerFromLinks(ref);
+}}
                   title={link ? `Linked: ${link.name} (right-click/long-press to unlink)` : "Unlinked (tap to paint/link)"}
                 />
               );
