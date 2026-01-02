@@ -724,13 +724,7 @@ function remapPermutation(p: Map<Id, Id>, remap: Record<string, Id | "">) {
       <div className="canvasWrap">
         <DiagramCanvas
   diagram={selectedDiagram}
-  algo={
-    mode === "editAlgorithm"
-      ? selectedAlgo
-      : mode === "combine"
-      ? { id: "preview", diagramId: selectedDiagram.id, name: "preview", moves: combinePreview.moves }
-      : undefined
-  }
+  algo={mode === "editAlgorithm" ? selectedAlgo : (mode === "combine" ? { id: "preview" as any, diagramId: selectedDiagram.id, name: "preview", moves: combinePreview.moves } as any : undefined)}
   mode={mode}
   tool={tool}
   paintColor={paintColor}
