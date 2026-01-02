@@ -663,12 +663,18 @@ export function App() {
 type CanvasProps = {
   diagram: Diagram;
   algo?: Algorithm;
+  mode: Mode;
   tool: Tool;
   paintColor: StickerColor;
   pendingLinkStickers: StickerRef[];
   setPendingLinkStickers: React.Dispatch<React.SetStateAction<StickerRef[]>>;
   updateDiagram: (mut: (d: Diagram) => void) => void;
   removeStickerFromLinks: (ref: StickerRef) => void;
+
+  // algorithm click-to-add
+  moveFrom: Id | "";
+  setMoveFrom: React.Dispatch<React.SetStateAction<Id | "">>;
+  addMoveByGroup: (fromId: Id, toId: Id) => void;
 };
 
 function DiagramCanvas(props: CanvasProps) {
