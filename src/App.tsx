@@ -632,7 +632,13 @@ const combinePreview = useMemo(() => {
       <div className="canvasWrap">
         <DiagramCanvas
   diagram={selectedDiagram}
-  algo={mode === "editAlgorithm" ? selectedAlgo : undefined}
+  algo={
+    mode === "editAlgorithm"
+      ? selectedAlgo
+      : mode === "combine"
+      ? { id: "preview", diagramId: selectedDiagram.id, name: "preview", moves: combinePreview.moves }
+      : undefined
+  }
   mode={mode}
   tool={tool}
   paintColor={paintColor}
