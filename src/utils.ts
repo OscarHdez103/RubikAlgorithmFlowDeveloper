@@ -1,5 +1,4 @@
-import type { Diagram, Grid, Id, LinkGroup, StickerRef } from "./types";
-
+import type { Diagram, Grid, Id, LinkGroup, StickerRef, StickerColor } from "./types";
 export function uid(): Id {
   return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
 }
