@@ -65,6 +65,9 @@ export function App() {
   const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
 const [combineName, setCombineName] = useState("Combined");
 
+const [remapPickStep, setRemapPickStep] = useState<number | null>(null); // which step is picking on-canvas
+const [remapPickFrom, setRemapPickFrom] = useState<Id | "">("");         // first click (source group)
+  
   // Persist
   useEffect(() => {
     setStore(prev => {
