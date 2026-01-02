@@ -238,50 +238,7 @@ export function App() {
     });
   }
 
-  function combineCreate(type: "compose" | "power") {
-    // Build permutation from algos (must be closed loops)
-    const a = store.algorithms.find(x => x.id === combineA);
-    if (!a) return;
-
-    const diagram = store.diagrams.find(d => d.id === selectedDiagram.id)!;
-
-    const valA = validateClosedLoop(a.moves);
-    if (!valA.ok) return;
-
-    let permA = movesToPermutation(a.moves);
-
-    let permOut = new Map<Id, Id>();
-
-    if (type === "power") {
-      const times = clamp(Math.floor(powerTimes), 1, 999);
-      permOut = applyPermutationPower(permA, times);
-    } else {
-      const b = store.algorithms.find(x => x.id === combineB);
-      if (!b) return;
-      const valB = validateClosedLoop(b.moves);
-      if (!valB.ok) return;
-      const permB = movesToPermutation(b.moves);
-      // compose: first B then A
-      permOut = composePermutations(permA, permB);
-    }
-
-    const outMoves = permutationToMoves(permOut);
-
-    const newAlgo: Algorithm = {
-      id: uid(),
-      diagramId: diagram.id,
-      name: combineName.trim() || "Combined",
-      moves: outMoves
-    };
-
-    setStore(prev => {
-      const next = deepClone(prev);
-      next.algorithms.push(newAlgo);
-      return next;
-    });
-    setSelectedAlgoId(newAlgo.id);
-    setMode("editAlgorithm");
-  }
+  
 
   // Export / Import
   const [jsonText, setJsonText] = useState("");
