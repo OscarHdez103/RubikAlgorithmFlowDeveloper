@@ -74,7 +74,7 @@ export function App() {
     saveStore(store);
   }, [store]);
 
-  // Keep selected algo valid
+  // Keep selected albuttonid
   useEffect(() => {
     const algos = store.algorithms.filter(a => a.diagramId === selectedDiagram.id);
     if (!algos.length) setSelectedAlgoId(undefined);
@@ -370,7 +370,6 @@ export function App() {
             <div className="row" style={{ marginTop: 8 }}>
               <button className={`btn ${tool === "paint" ? "primary" : ""}`} onClick={() => setTool("paint")}>Paint</button>
               <button className={`btn ${tool === "link" ? "primary" : ""}`} onClick={() => setTool("link")}>Link</button>
-              <button className={`btn ${tool === "move" ? "primary" : ""}`} onClick={() => setTool("move")}>Move grids</button>
             </div>
 
             {tool === "paint" && (
