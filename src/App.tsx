@@ -54,11 +54,7 @@ export function App() {
   const [moveFrom, setMoveFrom] = useState<Id | "">("");
   const [moveTo, setMoveTo] = useState<Id | "">("");
 
-  // Combine
-  const [combineA, setCombineA] = useState<Id | "">("");
-  const [combineB, setCombineB] = useState<Id | "">("");
-  const [powerTimes, setPowerTimes] = useState<number>(2);
-  const [combineName, setCombineName] = useState("Combined");
+  
 
   // Persist
   useEffect(() => {
