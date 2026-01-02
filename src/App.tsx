@@ -729,10 +729,40 @@ function DiagramCanvas(props: CanvasProps) {
     });
   }
 
-  function onStickerTap(ref: StickerRef) {
-    if (tool === "paint") paint(ref);
-    if (tool === "link") togglePending(ref);
+  function groupIdForSticker(diagram: Diagram, ref: StickerRef): Id {
+  const lg = findLinkGroupForSticker(diagram, ref);
+  if (lg) return lg.id;
+  return `single:${stickerKey(ref)}`;
+}
+
+function onStickerTap(ref: StickerRef) {
+  // IMPORTANT: behavior depends on MODE, not TOOL
+  if (props.mode === "editAlgorithm") {
+    const gid = groupIdForSticker(diagram, ref);
+
+    // first click sets "from"
+    if (!props.moveFrom) {
+      props.setMoveFrom(gid);
+      return;
+    }
+
+    // second click sets "to" and adds move
+    if (props.moveFrom !== gid) {
+      props.addMoveByGroup(props.moveFrom as Id, gid);
+    }
+
+    // reset so next arrow is easy
+    props.setMoveFrom("");
+    return;
   }
+
+  // Combine mode: ignore sticker taps (prevents paint leaking)
+  if (props.mode === "combine") return;
+
+  // Diagram mode: existing behavior
+  if (tool === "paint") paint(ref);
+  if (tool === "link") togglePending(ref);
+}
 
   function onGridPointerDown(e: React.PointerEvent, gridId: Id) {
     if (tool !== "move") return;
