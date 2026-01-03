@@ -162,3 +162,17 @@ a { color: var(--accent); }
 .gridTitle:active {
   cursor: grabbing;
                    }
+
+/* Arrows must be above everything */
+.arrowLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* Ensure grids stay below arrow layer */
+.grid {
+  position: absolute;
+  z-index: 10;
+}
