@@ -1162,7 +1162,7 @@ function DiagramCanvas(props: CanvasProps) {
                 <div
                   key={key}
                   ref={el => setStickerEl(key, el)}
-                  className={`sticker ${selected ? "selected" : ""} ${algoFrom ? "selected" : ""}`}
+                  className={`sticker ${selected ? "selected" : ""} ${algoFrom ? "selected" : ""} ${props.mode === "combine" && props.remapPick && gid === props.remapPick.oldId ? "remapFrom" : ""}`}
                   style={{ background: COLOR_HEX[color] }}
                   onClick={() => onStickerTap(ref)}
                   onContextMenu={(e) => {
