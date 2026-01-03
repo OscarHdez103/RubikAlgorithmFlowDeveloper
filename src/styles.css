@@ -176,3 +176,8 @@ a { color: var(--accent); }
   position: absolute;
   z-index: 10;
 }
+.sticker.remapFrom {
+  outline: 3px solid var(--danger);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(255,106,122,0.35);
+}
