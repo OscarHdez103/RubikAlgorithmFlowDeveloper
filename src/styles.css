@@ -23,7 +23,7 @@ a { color: var(--accent); }
 }
 
 @media (max-width: 920px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: 330px 1fr; }
+  .app { grid-template-columns: 1fr; grid-template-rows: 330px minmax(0, 1fr); }
 }
 
 .sidebar {
