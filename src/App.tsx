@@ -83,6 +83,7 @@ export function App() {
 
   // Algorithm click-to-add arrows
   const [moveFrom, setMoveFrom] = useState<Id | "">("");
+  const [moveFromSticker, setMoveFromSticker] = useState<StickerRef | null>(null);
 
   // Combine (new UI)
   const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
@@ -280,17 +281,17 @@ export function App() {
     });
   }
 
-  function addMoveByGroup(fromId: Id, toId: Id) {
-    if (!selectedAlgo) return;
-    if (fromId === toId) return;
-
-    updateAlgo(a => {
-      const hasOut = a.moves.some(m => m.fromGroupId === fromId);
-      const hasIn = a.moves.some(m => m.toGroupId === toId);
-      if (hasOut || hasIn) return;
-      a.moves.push({ fromGroupId: fromId, toGroupId: toId });
-    });
-  }
+  // function addMoveByGroup(fromId: Id, toId: Id) {
+  //   if (!selectedAlgo) return;
+  //   if (fromId === toId) return;
+  //
+  //   updateAlgo(a => {
+  //     const hasOut = a.moves.some(m => m.fromGroupId === fromId);
+  //     const hasIn = a.moves.some(m => m.toGroupId === toId);
+  //     if (hasOut || hasIn) return;
+  //     a.moves.push({ fromGroupId: fromId, toGroupId: toId });
+  //   });
+  // }
 
   function deleteMove(i: number) {
     updateAlgo(a => {
@@ -863,7 +864,25 @@ export function App() {
           removeStickerFromLinks={removeStickerFromLinks}
           moveFrom={moveFrom}
           setMoveFrom={setMoveFrom}
-          addMoveByGroup={addMoveByGroup}
+          addMoveByGroup={(fromId, toId, fromSticker, toSticker) => {
+            if (!selectedAlgo) return;
+            updateAlgo(a => {
+              const hasOut = a.moves.some(m => m.fromGroupId === fromId);
+              const hasIn = a.moves.some(m => m.toGroupId === toId);
+              if (hasOut || hasIn) return;
+
+              a.moves.push({
+                fromGroupId: fromId,
+                toGroupId: toId,
+                fromSticker,
+                toSticker
+              });
+            });
+          }}
+          moveFromSticker={moveFromSticker}
+          setMoveFromSticker={setMoveFromSticker}
+
+
           remapPick={remapPick}
           setRemapPick={setRemapPick}
           applyRemapTarget={(stepIndex, oldId, targetId) => {
@@ -891,7 +910,10 @@ type CanvasProps = {
 
   moveFrom: Id | "";
   setMoveFrom: React.Dispatch<React.SetStateAction<Id | "">>;
-  addMoveByGroup: (fromId: Id, toId: Id) => void;
+  moveFromSticker: StickerRef | null;
+  setMoveFromSticker: React.Dispatch<React.SetStateAction<StickerRef | null>>;
+  addMoveByGroup: (fromId: Id, toId: Id, fromSticker: StickerRef, toSticker: StickerRef) => void;
+
 
   remapPick: { stepIndex: number; oldId: Id } | null;
   setRemapPick: React.Dispatch<React.SetStateAction<{ stepIndex: number; oldId: Id } | null>>;
@@ -972,14 +994,18 @@ function DiagramCanvas(props: CanvasProps) {
 
       if (!props.moveFrom) {
         props.setMoveFrom(gid);
+        props.setMoveFromSticker(ref);
         return;
       }
 
       if (props.moveFrom !== gid) {
-        props.addMoveByGroup(props.moveFrom as Id, gid);
+        if (props.moveFromSticker) {
+          props.addMoveByGroup(props.moveFrom as Id, gid, props.moveFromSticker, ref);
+        }
       }
 
       props.setMoveFrom("");
+      props.setMoveFromSticker(null);
       return;
     }
 
@@ -1043,18 +1069,58 @@ function DiagramCanvas(props: CanvasProps) {
       const fromMembers = idToMembers.get(m.fromGroupId);
       const toMembers = idToMembers.get(m.toGroupId);
       if (!fromMembers?.length || !toMembers?.length) return;
-      // arrows.push({ from: fromMembers[0], to: toMembers[0], i });
-      let chosenFrom = fromMembers[0];
-      let chosenTo = toMembers[0];
 
-      outer: for (const fm of fromMembers) {
-        for (const tm of toMembers) {
-          if (fm.gridId === tm.gridId) {
-            chosenFrom = fm;
-            chosenTo = tm;
-            break outer;
+      const clickedFrom = m.fromSticker;
+      const clickedTo = m.toSticker;
+      const fromOk =
+          clickedFrom &&
+          clickedFrom.gridId === (clickedFrom.gridId) &&
+          fromMembers.some(s => s.gridId === clickedFrom.gridId && s.r === clickedFrom.r && s.c === clickedFrom.c);
+
+      const toOk =
+          clickedTo &&
+          toMembers.some(s => s.gridId === clickedTo.gridId && s.r === clickedTo.r && s.c === clickedTo.c);
+
+      const defaultFrom = fromOk ? (clickedFrom as StickerRef) : fromMembers[0];
+      const defaultTo = toOk ? (clickedTo as StickerRef) : toMembers[0];
+
+      // arrows.push({ from: fromMembers[0], to: toMembers[0], i });
+      // const defaultFrom = fromMembers[0];
+      // const defaultTo = toMembers[0];
+
+      // Start with the exact stickers selected (first member = selected)
+      let chosenFrom = defaultFrom;
+      let chosenTo = defaultTo;
+
+      // If default pair is across different grids, try to find a same-grid pair.
+      if (defaultFrom.gridId !== defaultTo.gridId) {
+        // 1) Prefer a same-grid pair that stays in the source's grid.
+        let found = false;
+        for (const fm of fromMembers) {
+          for (const tm of toMembers) {
+            if (fm.gridId === tm.gridId && fm.gridId === defaultFrom.gridId) {
+              chosenFrom = fm;
+              chosenTo = tm;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+
+        // 2) If not found, fall back to any same-grid pair.
+        if (!found) {
+          outer: for (const fm of fromMembers) {
+            for (const tm of toMembers) {
+              if (fm.gridId === tm.gridId) {
+                chosenFrom = fm;
+                chosenTo = tm;
+                break outer;
+              }
+            }
           }
         }
+        // 3) If still not found, keep the default pair (first members).
       }
 
       arrows.push({ from: chosenFrom, to: chosenTo, i });

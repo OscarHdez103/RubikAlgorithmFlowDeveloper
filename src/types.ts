@@ -52,6 +52,8 @@ export type AlgoMove = {
   // moves defined on link-groups or single stickers if not in any group
   fromGroupId: Id;
   toGroupId: Id;
+  fromSticker?: StickerRef; // which sticker user clicked for "from"
+  toSticker?: StickerRef;   // which sticker user clicked for "to"
 };
 
 export type Algorithm = {
