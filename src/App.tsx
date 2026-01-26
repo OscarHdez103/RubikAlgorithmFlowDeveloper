@@ -1043,7 +1043,21 @@ function DiagramCanvas(props: CanvasProps) {
       const fromMembers = idToMembers.get(m.fromGroupId);
       const toMembers = idToMembers.get(m.toGroupId);
       if (!fromMembers?.length || !toMembers?.length) return;
-      arrows.push({ from: fromMembers[0], to: toMembers[0], i });
+      // arrows.push({ from: fromMembers[0], to: toMembers[0], i });
+      let chosenFrom = fromMembers[0];
+      let chosenTo = toMembers[0];
+
+      outer: for (const fm of fromMembers) {
+        for (const tm of toMembers) {
+          if (fm.gridId === tm.gridId) {
+            chosenFrom = fm;
+            chosenTo = tm;
+            break outer;
+          }
+        }
+      }
+
+      arrows.push({ from: chosenFrom, to: chosenTo, i });
     });
     return arrows;
   }, [algo, diagram]);
