@@ -92,6 +92,8 @@ export function App() {
   // Remap picking state (click stickers instead of dropdowns)
   const [remapPick, setRemapPick] = useState<{ stepIndex: number; oldId: Id } | null>(null);
 
+  const [highlightMoveIndex, setHighlightMoveIndex] = useState<number | null>(null);
+
   // Persist
   useEffect(() => {
     setStore(prev => {
@@ -217,6 +219,7 @@ export function App() {
     });
     setSelectedAlgoId(a.id);
     setMode("editAlgorithm");
+    setHighlightMoveIndex(null);
     setMoveFrom("");
   }
 
@@ -228,6 +231,7 @@ export function App() {
     });
     if (selectedAlgoId === id) setSelectedAlgoId(undefined);
     setMoveFrom("");
+    setHighlightMoveIndex(null);
   }
 
   function addGrid() {
@@ -507,7 +511,12 @@ export function App() {
                 <select
                   className="field"
                   value={selectedAlgoId ?? ""}
-                  onChange={e => { setSelectedAlgoId(e.target.value || undefined); setMoveFrom(""); }}
+                  onChange={e => {
+                    setSelectedAlgoId(e.target.value || undefined);
+                    setMoveFrom("");
+                    setMoveFromSticker(null);
+                    setHighlightMoveIndex(null);
+                  }}
                 >
                   <option value="">(none)</option>
                   {diagramAlgos.map(a => (
@@ -560,7 +569,24 @@ export function App() {
                           <div><span className="badge">from</span> {groups.find(g => g.id === m.fromGroupId)?.label ?? m.fromGroupId}</div>
                           <div><span className="badge">to</span> {groups.find(g => g.id === m.toGroupId)?.label ?? m.toGroupId}</div>
                         </div>
-                        <button className="btn danger" onClick={() => deleteMove(i)}>Delete</button>
+                        <div className="row">
+                          <button
+                              className={`btn ${highlightMoveIndex === i ? "primary" : ""}`}
+                              onClick={() => setHighlightMoveIndex(prev => (prev === i ? null : i))}
+                          >
+                            {highlightMoveIndex === i ? "Showing" : "Show"}
+                          </button>
+
+                          <button
+                              className="btn danger"
+                              onClick={() => {
+                                deleteMove(i);
+                                setHighlightMoveIndex(prev => (prev === i ? null : prev !== null && prev > i ? prev - 1 : prev));
+                              }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -881,8 +907,7 @@ export function App() {
           }}
           moveFromSticker={moveFromSticker}
           setMoveFromSticker={setMoveFromSticker}
-
-
+          highlightMoveIndex={mode === "editAlgorithm" ? highlightMoveIndex : null}
           remapPick={remapPick}
           setRemapPick={setRemapPick}
           applyRemapTarget={(stepIndex, oldId, targetId) => {
@@ -914,6 +939,7 @@ type CanvasProps = {
   setMoveFromSticker: React.Dispatch<React.SetStateAction<StickerRef | null>>;
   addMoveByGroup: (fromId: Id, toId: Id, fromSticker: StickerRef, toSticker: StickerRef) => void;
 
+  highlightMoveIndex: number | null;
 
   remapPick: { stepIndex: number; oldId: Id } | null;
   setRemapPick: React.Dispatch<React.SetStateAction<{ stepIndex: number; oldId: Id } | null>>;
@@ -1128,10 +1154,10 @@ function DiagramCanvas(props: CanvasProps) {
     return arrows;
   }, [algo, diagram]);
 
-  const [paths, setPaths] = useState<{ d: string; head: { x: number; y: number; ang: number }; key: string }[]>([]);
+  const [paths, setPaths] = useState<{ d: string; head: { x: number; y: number; ang: number }; key: string; i: number }[]>([]);
   useEffect(() => {
     function recompute() {
-      const out: { d: string; head: { x: number; y: number; ang: number }; key: string }[] = [];
+      const out: { d: string; head: { x: number; y: number; ang: number }; key: string; i: number }[] = [];
       const canvasEl = document.getElementById("canvas-root");
       if (!canvasEl) return;
       const canvasRect = canvasEl.getBoundingClientRect();
@@ -1168,7 +1194,7 @@ function DiagramCanvas(props: CanvasProps) {
         const ty = y2 - cy2;
         const ang = Math.atan2(ty, tx);
 
-        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}` });
+        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i });
       }
 
       setPaths(out);
@@ -1199,12 +1225,35 @@ function DiagramCanvas(props: CanvasProps) {
           </filter>
         </defs>
 
-        {paths.map(p => (
-          <g key={p.key} filter="url(#glow)">
-            <path d={p.d} fill="none" stroke="rgba(106,168,255,0.9)" strokeWidth={2.2} />
-            <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />
-          </g>
-        ))}
+        {/*{paths.map(p => (*/}
+        {/*  <g key={p.key} filter="url(#glow)">*/}
+        {/*    <path d={p.d} fill="none" stroke="rgba(106,168,255,0.9)" strokeWidth={2.2} />*/}
+        {/*    <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />*/}
+        {/*  </g>*/}
+        {/*))}*/}
+
+        {paths.map(p => {
+          const active = props.highlightMoveIndex !== null;
+          const isHi = props.highlightMoveIndex === p.i;
+
+          const stroke = active
+              ? (isHi ? "rgba(255,255,255,0.95)" : "rgba(106,168,255,0.18)")
+              : "rgba(106,168,255,0.9)";
+
+          const width = active
+              ? (isHi ? 4.0 : 2.0)
+              : 2.2;
+
+          const opacity = active ? (isHi ? 1 : 0.6) : 1;
+
+          return (
+              <g key={p.key} filter="url(#glow)" style={{ opacity }}>
+                <path d={p.d} fill="none" stroke={stroke} strokeWidth={width} />
+                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />
+              </g>
+          );
+        })}
+
       </svg>
 
       {diagram.grids.map(g => (
