@@ -125,10 +125,12 @@ export function App() {
 
     for (let i = 0; i < combineItems.length; i++) {
       const item = combineItems[i];
-      if (!item.algoId) return { ok: false, moves: [], error: `Step ${i + 1}: choose an algorithm.` };
+      if (!item.algoId) { continue; }
+      // if (!item.algoId) return { ok: false, moves: [], error: `Step ${i + 1}: selected algorithm no longer exists.` };
 
       const algo = store.algorithms.find(a => a.id === item.algoId);
-      if (!algo) return { ok: false, moves: [], error: `Step ${i + 1}: algorithm not found.` };
+      if (!algo) return { ok: false, moves: [], error: `Step ${i + 1}: selected algorithm no longer exists.` };
+      // if (!algo) return { ok: false, moves: [], error: `Step ${i + 1}: algorithm not found.` };
 
       const v = validateClosedLoop(algo.moves);
       if (!v.ok) return { ok: false, moves: [], error: `Step ${i + 1}: "${algo.name}" is not a closed loop.` };
