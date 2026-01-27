@@ -698,7 +698,7 @@ export function App() {
                       remap: {},
                       showRemap: false,
 
-                      collapsed: false,
+                      collapsed: true,
 
                       translateOn: false,
                       translateAlgoId: "",
