@@ -178,20 +178,31 @@ export function App() {
       baseP = remapPermutation(baseP, item.remap);
 
       // ---- Translate (optional) ----
+      // If ON but no algo chosen, treat as identity (no-op)
       let T: Map<Id, Id> | null = null;
       if (item.translateOn) {
-        const trRes = getAlgoOrFail(item.translateAlgoId, stepNo, "translate");
-        if (!trRes.ok) return { ok: false, moves: [], error: trRes.error };
-        T = buildPermutationFromAlgo(trRes.algo, item.translatePowText, item.translateInvert);
+        if (!item.translateAlgoId) {
+          T = new Map<Id, Id>(); // identity
+        } else {
+          const trRes = getAlgoOrFail(item.translateAlgoId, stepNo, "translate");
+          if (!trRes.ok) return { ok: false, moves: [], error: trRes.error };
+          T = buildPermutationFromAlgo(trRes.algo, item.translatePowText, item.translateInvert);
+        }
       }
 
       // ---- Mirror (optional) ----
+      // If ON but no algo chosen, treat as identity (no-op)
       let M: Map<Id, Id> | null = null;
       if (item.mirrorOn) {
-        const mRes = getAlgoOrFail(item.mirrorAlgoId, stepNo, "mirror");
-        if (!mRes.ok) return { ok: false, moves: [], error: mRes.error };
-        M = buildPermutationFromAlgo(mRes.algo, item.mirrorPowText, item.mirrorInvert);
+        if (!item.mirrorAlgoId) {
+          M = new Map<Id, Id>(); // identity
+        } else {
+          const mRes = getAlgoOrFail(item.mirrorAlgoId, stepNo, "mirror");
+          if (!mRes.ok) return { ok: false, moves: [], error: mRes.error };
+          M = buildPermutationFromAlgo(mRes.algo, item.mirrorPowText, item.mirrorInvert);
+        }
       }
+
 
       // ---- Build the step permutation S ----
       // Priority: Translate outer, Mirror inner
@@ -776,7 +787,13 @@ export function App() {
                             className="btn danger"
                             onClick={() => {
                               setCombineItems(prev => prev.filter((_, idx) => idx !== i));
-                              setRemapPick(p => (p && p.stepIndex === i ? null : p));
+                              setRemapPick(p => {
+                                if (!p) return null;
+                                if (p.stepIndex === i) return null;
+                                if (p.stepIndex > i) return { ...p, stepIndex: p.stepIndex - 1 };
+                                return p;
+                              });
+                              // setRemapPick(p => (p && p.stepIndex === i ? null : p));
                             }}
                         >
                           Remove
@@ -799,18 +816,7 @@ export function App() {
                                           ...x,
                                           algoId: newId,
                                           remap: {},
-                                          showRemap: false,
-
-                                          // clear wrappers when base changes
-                                          translateOn: false,
-                                          translateAlgoId: "",
-                                          translatePowText: "1",
-                                          translateInvert: false,
-
-                                          mirrorOn: false,
-                                          mirrorAlgoId: "",
-                                          mirrorPowText: "1",
-                                          mirrorInvert: false
+                                          showRemap: false
                                         }
                                         : x
                                 )
@@ -983,7 +989,7 @@ export function App() {
                                         prev.map((x, idx) => {
                                           if (idx !== i) return x;
                                           const on = !x.translateOn;
-                                          return on ? { ...x, translateOn: true } : { ...x, translateOn: false, translateAlgoId: "", translatePowText: "1", translateInvert: false };
+                                          return { ...x, translateOn: on };
                                         })
                                     );
                                     setRemapPick(null);
@@ -1064,7 +1070,7 @@ export function App() {
                                         prev.map((x, idx) => {
                                           if (idx !== i) return x;
                                           const on = !x.mirrorOn;
-                                          return on ? { ...x, mirrorOn: true } : { ...x, mirrorOn: false, mirrorAlgoId: "", mirrorPowText: "1", mirrorInvert: false };
+                                          return { ...x, mirrorOn: on };
                                         })
                                     );
                                     setRemapPick(null);
