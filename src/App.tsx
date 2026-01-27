@@ -30,11 +30,29 @@ type Tool = "paint" | "link";
  * - showRemap: toggle remap UI
  */
 type CombineItem = {
+  // Base
   algoId: Id | "";
   powText: string;
   invert: boolean;
+
+  // Remap
   remap: Record<string, Id | "">; // oldGroupId -> newGroupId
   showRemap: boolean;
+
+  // Collapse step UI
+  collapsed: boolean;
+
+  // Translate (conjugation wrapper)
+  translateOn: boolean;
+  translateAlgoId: Id | "";
+  translatePowText: string;
+  translateInvert: boolean;
+
+  // Mirror (second conjugation wrapper, lower priority)
+  mirrorOn: boolean;
+  mirrorAlgoId: Id | "";
+  mirrorPowText: string;
+  mirrorInvert: boolean;
 };
 
 function invertPermutation(p: Map<Id, Id>) {
@@ -119,33 +137,81 @@ export function App() {
   const groups = useMemo(() => allSelectableGroups(selectedDiagram), [selectedDiagram]);
 
   const combinePreview = useMemo(() => {
+    function getAlgoOrFail(id: Id | "", step: number, label: string) {
+      if (!id) return { ok: false as const, algo: null as any, error: `Step ${step}: ${label} algorithm not selected.` };
+      const algo = store.algorithms.find(a => a.id === id);
+      if (!algo) return { ok: false as const, algo: null as any, error: `Step ${step}: ${label} algorithm no longer exists.` };
+
+      const v = validateClosedLoop(algo.moves);
+      if (!v.ok) return { ok: false as const, algo: null as any, error: `Step ${step}: "${algo.name}" (${label}) is not a closed loop.` };
+
+      return { ok: true as const, algo, error: "" };
+    }
+    function buildPermutationFromAlgo(
+        algo: Algorithm,
+        powText: string,
+        invert: boolean
+    ) {
+      let p = movesToPermutation(algo.moves);
+      if (invert) p = invertPermutation(p);
+
+      const pow = clamp(Math.floor(Number(powText || "1")), 1, 999);
+      p = applyPermutationPower(p, pow);
+      return p;
+    }
+
     if (!combineItems.length) return { ok: true, moves: [] as { fromGroupId: Id; toGroupId: Id }[], error: "" };
 
     let result = new Map<Id, Id>(); // identity
 
     for (let i = 0; i < combineItems.length; i++) {
       const item = combineItems[i];
-      if (!item.algoId) { continue; }
-      // if (!item.algoId) return { ok: false, moves: [], error: `Step ${i + 1}: selected algorithm no longer exists.` };
+      if (!item.algoId) continue; // blank step is ignored
 
-      const algo = store.algorithms.find(a => a.id === item.algoId);
-      if (!algo) return { ok: false, moves: [], error: `Step ${i + 1}: selected algorithm no longer exists.` };
-      // if (!algo) return { ok: false, moves: [], error: `Step ${i + 1}: algorithm not found.` };
+      const stepNo = i + 1;
 
-      const v = validateClosedLoop(algo.moves);
-      if (!v.ok) return { ok: false, moves: [], error: `Step ${i + 1}: "${algo.name}" is not a closed loop.` };
+      // ---- Base ----
+      const baseRes = getAlgoOrFail(item.algoId, stepNo, "base");
+      if (!baseRes.ok) return { ok: false, moves: [], error: baseRes.error };
 
-      let p = movesToPermutation(algo.moves);
+      let baseP = buildPermutationFromAlgo(baseRes.algo, item.powText, item.invert);
+      baseP = remapPermutation(baseP, item.remap);
 
-      if (item.invert) p = invertPermutation(p);
+      // ---- Translate (optional) ----
+      let T: Map<Id, Id> | null = null;
+      if (item.translateOn) {
+        const trRes = getAlgoOrFail(item.translateAlgoId, stepNo, "translate");
+        if (!trRes.ok) return { ok: false, moves: [], error: trRes.error };
+        T = buildPermutationFromAlgo(trRes.algo, item.translatePowText, item.translateInvert);
+      }
 
-      const pow = clamp(Math.floor(Number(item.powText || "1")), 1, 999);
-      p = applyPermutationPower(p, pow);
+      // ---- Mirror (optional) ----
+      let M: Map<Id, Id> | null = null;
+      if (item.mirrorOn) {
+        const mRes = getAlgoOrFail(item.mirrorAlgoId, stepNo, "mirror");
+        if (!mRes.ok) return { ok: false, moves: [], error: mRes.error };
+        M = buildPermutationFromAlgo(mRes.algo, item.mirrorPowText, item.mirrorInvert);
+      }
 
-      p = remapPermutation(p, item.remap);
+      // ---- Build the step permutation S ----
+      // Priority: Translate outer, Mirror inner
+      // S = T ∘ M ∘ B ∘ M^{-1} ∘ T^{-1}
+      let stepP = baseP;
 
-      // apply earlier items first: result = p ∘ result (first result then p)
-      result = composePermutations(p, result);
+      if (M) {
+        const Minv = invertPermutation(M);
+        stepP = composePermutations(M, stepP);
+        stepP = composePermutations(stepP, Minv); // (M ∘ B) ∘ M^{-1}
+      }
+
+      if (T) {
+        const Tinv = invertPermutation(T);
+        stepP = composePermutations(T, stepP);
+        stepP = composePermutations(stepP, Tinv); // (T ∘ ( ... )) ∘ T^{-1}
+      }
+
+      // apply earlier items first: result = stepP ∘ result
+      result = composePermutations(stepP, result);
     }
 
     return { ok: true, moves: permutationToMoves(result), error: "" };
@@ -625,7 +691,25 @@ export function App() {
                 onClick={() => {
                   setCombineItems(prev => [
                     ...prev,
-                    { algoId: "", powText: "1", invert: false, remap: {}, showRemap: false }
+                    {
+                      algoId: "",
+                      powText: "1",
+                      invert: false,
+                      remap: {},
+                      showRemap: false,
+
+                      collapsed: false,
+
+                      translateOn: false,
+                      translateAlgoId: "",
+                      translatePowText: "1",
+                      translateInvert: false,
+
+                      mirrorOn: false,
+                      mirrorAlgoId: "",
+                      mirrorPowText: "1",
+                      mirrorInvert: false
+                    }
                   ]);
                 }}
               >
@@ -641,186 +725,418 @@ export function App() {
 
             <div className="col" style={{ marginTop: 10 }}>
               {combineItems.map((it, i) => (
-                <div key={i} className="col" style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 10 }}>
-                  <div className="row spread">
-                    <div style={{ fontWeight: 700 }}>Step {i + 1}</div>
-                    <div className="row">
-                      <button className="btn" onClick={() => {
-                        setCombineItems(prev => {
-                          if (i === 0) return prev;
-                          const a = [...prev];
-                          [a[i - 1], a[i]] = [a[i], a[i - 1]];
-                          return a;
-                        });
-                      }}>↑</button>
+                  <div key={i} className="col" style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 10 }}>
+                    <div className="row spread">
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <div style={{ fontWeight: 700 }}>Step {i + 1}</div>
 
-                      <button className="btn" onClick={() => {
-                        setCombineItems(prev => {
-                          if (i === prev.length - 1) return prev;
-                          const a = [...prev];
-                          [a[i + 1], a[i]] = [a[i], a[i + 1]];
-                          return a;
-                        });
-                      }}>↓</button>
-
-                      <button className="btn danger" onClick={() => {
-                        setCombineItems(prev => prev.filter((_, idx) => idx !== i));
-                        setRemapPick(p => (p && p.stepIndex === i ? null : p));
-                      }}>
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Per-step dropdown (blank step then choose) */}
-                  <div className="col" style={{ marginTop: 8 }}>
-                    <div className="muted">Algorithm</div>
-                    <select
-                      className="field"
-                      value={it.algoId}
-                      onChange={e => {
-                        const newId = e.target.value as Id | "";
-                        setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, algoId: newId, remap: {} } : x));
-                        setRemapPick(null);
-                      }}
-                    >
-                      <option value="">(choose…)</option>
-                      {diagramAlgos.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="row" style={{ marginTop: 8 }}>
-                    {/* Power textbox that allows empty while editing */}
-                    <div className="col" style={{ flex: 1 }}>
-                      <div className="muted">Power</div>
-                      <input
-                        className="field"
-                        inputMode="numeric"
-                        value={it.powText}
-                        onChange={e => {
-                          const v = e.target.value;
-                          if (v === "" || /^[0-9]+$/.test(v)) {
-                            setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, powText: v } : x));
-                          }
-                        }}
-                        onBlur={() => {
-                          setCombineItems(prev => prev.map((x, idx) => {
-                            if (idx !== i) return x;
-                            const n = clamp(Math.floor(Number(x.powText || "1")), 1, 999);
-                            return { ...x, powText: String(n) };
-                          }));
-                        }}
-                      />
-                    </div>
-
-                    <div className="col" style={{ minWidth: 140 }}>
-                      <div className="muted">Reverse</div>
-                      <button
-                        className={`btn ${it.invert ? "primary" : ""}`}
-                        onClick={() => setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, invert: !x.invert } : x))}
-                      >
-                        {it.invert ? "ON" : "OFF"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="row" style={{ marginTop: 8 }}>
-                    <button
-                      className="btn"
-                      onClick={() => {
-                        setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, showRemap: !x.showRemap } : x));
-                        setRemapPick(null);
-                      }}
-                      disabled={!it.algoId}
-                    >
-                      {it.showRemap ? "Hide remap" : "Remap (move/flip)"}
-                    </button>
-
-                    <button
-                      className="btn"
-                      onClick={() => { setCombineItems(prev => prev.map((x, idx) => idx === i ? { ...x, remap: {} } : x)); setRemapPick(null); }}
-                      disabled={!it.algoId}
-                    >
-                      Clear remap
-                    </button>
-
-                    {remapPick && remapPick.stepIndex === i ? (
-                      <span className="badge">
-                        Click a target sticker… (mapping: {groups.find(g => g.id === remapPick.oldId)?.label ?? remapPick.oldId})
-                        <button className="btn" style={{ marginLeft: 8 }} onClick={() => setRemapPick(null)}>Cancel</button>
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {/* Remap UI (NO dropdown mapping list) */}
-                  {it.showRemap && it.algoId && (
-                    <div className="col" style={{ marginTop: 8 }}>
-                      <div className="muted">
-                        For this step only: pick a moved group (left) then click a sticker on the canvas to choose where it remaps to.
+                        <button
+                            className="btn"
+                            onClick={() => {
+                              setCombineItems(prev =>
+                                  prev.map((x, idx) => (idx === i ? { ...x, collapsed: !x.collapsed, showRemap: false } : x))
+                              );
+                              setRemapPick(null);
+                            }}
+                        >
+                          {it.collapsed ? "Show options" : "Hide options"}
+                        </button>
                       </div>
 
-                      {(() => {
-                        const algo = store.algorithms.find(a => a.id === it.algoId);
-                        if (!algo) return null;
+                      <div className="row">
+                        <button
+                            className="btn"
+                            onClick={() => {
+                              setCombineItems(prev => {
+                                if (i === 0) return prev;
+                                const a = [...prev];
+                                [a[i - 1], a[i]] = [a[i], a[i - 1]];
+                                return a;
+                              });
+                            }}
+                        >
+                          ↑
+                        </button>
 
-                        const movedSet = new Set<Id>();
-                        for (const m of algo.moves) { movedSet.add(m.fromGroupId); movedSet.add(m.toGroupId); }
-                        const movedIds = Array.from(movedSet);
+                        <button
+                            className="btn"
+                            onClick={() => {
+                              setCombineItems(prev => {
+                                if (i === prev.length - 1) return prev;
+                                const a = [...prev];
+                                [a[i + 1], a[i]] = [a[i], a[i + 1]];
+                                return a;
+                              });
+                            }}
+                        >
+                          ↓
+                        </button>
 
-                        return (
-                          <div className="col" style={{ gap: 8 }}>
-                            {movedIds.map(oldId => {
-                              const toId = it.remap[oldId] ?? "";
-                              const oldLabel = groups.find(g => g.id === oldId)?.label ?? oldId;
-                              const toLabel = toId ? (groups.find(g => g.id === toId)?.label ?? toId) : "(no change)";
-                              const pickingThis = remapPick && remapPick.stepIndex === i && remapPick.oldId === oldId;
+                        <button
+                            className="btn danger"
+                            onClick={() => {
+                              setCombineItems(prev => prev.filter((_, idx) => idx !== i));
+                              setRemapPick(p => (p && p.stepIndex === i ? null : p));
+                            }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
 
-                              return (
-                                <div key={oldId} className="row spread" style={{ border: "1px solid rgba(34,48,87,0.5)", padding: 8, borderRadius: 10 }}>
-                                  <div className="col" style={{ flex: 1, gap: 2 }}>
-                                    <div className="muted small">from</div>
-                                    <div>{oldLabel}</div>
-                                  </div>
+                    {/* ALWAYS visible */}
+                    <div className="col" style={{ marginTop: 8 }}>
+                      <div className="muted">Algorithm</div>
+                      <select
+                          className="field"
+                          value={it.algoId}
+                          onChange={e => {
+                            const newId = e.target.value as Id | "";
+                            setCombineItems(prev =>
+                                prev.map((x, idx) =>
+                                    idx === i
+                                        ? {
+                                          ...x,
+                                          algoId: newId,
+                                          remap: {},
+                                          showRemap: false,
 
-                                  <div className="col" style={{ flex: 1, gap: 2 }}>
-                                    <div className="muted small">to</div>
-                                    <div>{toLabel}</div>
-                                  </div>
+                                          // clear wrappers when base changes
+                                          translateOn: false,
+                                          translateAlgoId: "",
+                                          translatePowText: "1",
+                                          translateInvert: false,
 
-                                  <div className="row">
-                                    <button
-                                      className={`btn ${pickingThis ? "primary" : ""}`}
-                                      onClick={() => setRemapPick({ stepIndex: i, oldId })}
-                                    >
-                                      {pickingThis ? "Picking…" : "Pick target"}
-                                    </button>
+                                          mirrorOn: false,
+                                          mirrorAlgoId: "",
+                                          mirrorPowText: "1",
+                                          mirrorInvert: false
+                                        }
+                                        : x
+                                )
+                            );
+                            setRemapPick(null);
+                          }}
+                      >
+                        <option value="">(choose…)</option>
+                        {diagramAlgos.map(a => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                        ))}
+                      </select>
+                    </div>
 
-                                    <button
-                                      className="btn"
-                                      onClick={() => {
-                                        setCombineItems(prev => prev.map((x, idx) => {
+                    {/* Everything else collapses */}
+                    {/* Everything else collapses */}
+                    {!it.collapsed && (
+                        <>
+                          {/* Power + Reverse */}
+                          <div className="row" style={{ marginTop: 8 }}>
+                            <div className="col" style={{ flex: 1 }}>
+                              <div className="muted">Power</div>
+                              <input
+                                  className="field"
+                                  inputMode="numeric"
+                                  value={it.powText}
+                                  onChange={e => {
+                                    const v = e.target.value;
+                                    if (v === "" || /^[0-9]+$/.test(v)) {
+                                      setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, powText: v } : x)));
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    setCombineItems(prev =>
+                                        prev.map((x, idx) => {
                                           if (idx !== i) return x;
-                                          const next = { ...x.remap };
-                                          delete next[oldId];
-                                          return { ...x, remap: next };
-                                        }));
-                                        setRemapPick(null);
+                                          const n = clamp(Math.floor(Number(x.powText || "1")), 1, 999);
+                                          return { ...x, powText: String(n) };
+                                        })
+                                    );
+                                  }}
+                              />
+                            </div>
+
+                            <div className="col" style={{ minWidth: 140 }}>
+                              <div className="muted">Reverse</div>
+                              <button
+                                  className={`btn ${it.invert ? "primary" : ""}`}
+                                  onClick={() => setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, invert: !x.invert } : x)))}
+                              >
+                                {it.invert ? "ON" : "OFF"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Remap controls */}
+                          <div className="row" style={{ marginTop: 8 }}>
+                            <button
+                                className="btn"
+                                onClick={() => {
+                                  setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, showRemap: !x.showRemap } : x)));
+                                  setRemapPick(null);
+                                }}
+                                disabled={!it.algoId}
+                            >
+                              {it.showRemap ? "Hide remap" : "Remap (move/flip)"}
+                            </button>
+
+                            <button
+                                className="btn"
+                                onClick={() => {
+                                  setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, remap: {} } : x)));
+                                  setRemapPick(null);
+                                }}
+                                disabled={!it.algoId}
+                            >
+                              Clear remap
+                            </button>
+
+                            {remapPick && remapPick.stepIndex === i ? (
+                                <span className="badge">
+          Click a target sticker… (mapping: {groups.find(g => g.id === remapPick.oldId)?.label ?? remapPick.oldId})
+          <button className="btn" style={{ marginLeft: 8 }} onClick={() => setRemapPick(null)}>
+            Cancel
+          </button>
+        </span>
+                            ) : null}
+                          </div>
+
+                          {/* Remap list */}
+                          {it.showRemap && it.algoId && (
+                              <div className="col" style={{ marginTop: 8 }}>
+                                <div className="muted">
+                                  For this step only: pick a moved group (left) then click a sticker on the canvas to choose where it remaps to.
+                                </div>
+
+                                {(() => {
+                                  const algo = store.algorithms.find(a => a.id === it.algoId);
+                                  if (!algo) return null;
+
+                                  const movedSet = new Set<Id>();
+                                  for (const m of algo.moves) {
+                                    movedSet.add(m.fromGroupId);
+                                    movedSet.add(m.toGroupId);
+                                  }
+                                  const movedIds = Array.from(movedSet);
+
+                                  return (
+                                      <div className="col" style={{ gap: 8 }}>
+                                        {movedIds.map(oldId => {
+                                          const toId = it.remap[oldId] ?? "";
+                                          const oldLabel = groups.find(g => g.id === oldId)?.label ?? oldId;
+                                          const toLabel = toId ? (groups.find(g => g.id === toId)?.label ?? toId) : "(no change)";
+                                          const pickingThis = remapPick && remapPick.stepIndex === i && remapPick.oldId === oldId;
+
+                                          return (
+                                              <div key={oldId} className="row spread" style={{ border: "1px solid rgba(34,48,87,0.5)", padding: 8, borderRadius: 10 }}>
+                                                <div className="col" style={{ flex: 1, gap: 2 }}>
+                                                  <div className="muted small">from</div>
+                                                  <div>{oldLabel}</div>
+                                                </div>
+
+                                                <div className="col" style={{ flex: 1, gap: 2 }}>
+                                                  <div className="muted small">to</div>
+                                                  <div>{toLabel}</div>
+                                                </div>
+
+                                                <div className="row">
+                                                  <button className={`btn ${pickingThis ? "primary" : ""}`} onClick={() => setRemapPick({ stepIndex: i, oldId })}>
+                                                    {pickingThis ? "Picking…" : "Pick target"}
+                                                  </button>
+
+                                                  <button
+                                                      className="btn"
+                                                      onClick={() => {
+                                                        setCombineItems(prev =>
+                                                            prev.map((x, idx) => {
+                                                              if (idx !== i) return x;
+                                                              const next = { ...x.remap };
+                                                              delete next[oldId];
+                                                              return { ...x, remap: next };
+                                                            })
+                                                        );
+                                                        setRemapPick(null);
+                                                      }}
+                                                      disabled={!toId}
+                                                  >
+                                                    Clear
+                                                  </button>
+                                                </div>
+                                              </div>
+                                          );
+                                        })}
+                                      </div>
+                                  );
+                                })()}
+                              </div>
+                          )}
+
+                          {/* Translate (your existing block is fine; keep it, but put it here) */}
+                          <div className="row" style={{ marginTop: 10 }}>
+                            <div className="col" style={{ minWidth: 140 }}>
+                              <div className="muted">Translate</div>
+                              <button
+                                  className={`btn ${it.translateOn ? "primary" : ""}`}
+                                  onClick={() => {
+                                    setCombineItems(prev =>
+                                        prev.map((x, idx) => {
+                                          if (idx !== i) return x;
+                                          const on = !x.translateOn;
+                                          return on ? { ...x, translateOn: true } : { ...x, translateOn: false, translateAlgoId: "", translatePowText: "1", translateInvert: false };
+                                        })
+                                    );
+                                    setRemapPick(null);
+                                  }}
+                                  disabled={!it.algoId}
+                              >
+                                {it.translateOn ? "ON" : "OFF"}
+                              </button>
+                            </div>
+
+                            {it.translateOn && (
+                                <div className="col" style={{ flex: 1 }}>
+                                  <div className="muted">Translation algorithm</div>
+                                  <select
+                                      className="field"
+                                      value={it.translateAlgoId}
+                                      onChange={e => {
+                                        const newId = e.target.value as Id | "";
+                                        setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, translateAlgoId: newId } : x)));
                                       }}
-                                      disabled={!toId}
-                                    >
-                                      Clear
-                                    </button>
+                                  >
+                                    <option value="">(choose…)</option>
+                                    {diagramAlgos.map(a => (
+                                        <option key={a.id} value={a.id}>
+                                          {a.name}
+                                        </option>
+                                    ))}
+                                  </select>
+
+                                  <div className="row" style={{ marginTop: 8 }}>
+                                    <div className="col" style={{ flex: 1 }}>
+                                      <div className="muted">Translate power</div>
+                                      <input
+                                          className="field"
+                                          inputMode="numeric"
+                                          value={it.translatePowText}
+                                          onChange={e => {
+                                            const v = e.target.value;
+                                            if (v === "" || /^[0-9]+$/.test(v)) {
+                                              setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, translatePowText: v } : x)));
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            setCombineItems(prev =>
+                                                prev.map((x, idx) => {
+                                                  if (idx !== i) return x;
+                                                  const n = clamp(Math.floor(Number(x.translatePowText || "1")), 1, 999);
+                                                  return { ...x, translatePowText: String(n) };
+                                                })
+                                            );
+                                          }}
+                                      />
+                                    </div>
+
+                                    <div className="col" style={{ minWidth: 140 }}>
+                                      <div className="muted">Translate reverse</div>
+                                      <button
+                                          className={`btn ${it.translateInvert ? "primary" : ""}`}
+                                          onClick={() => setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, translateInvert: !x.translateInvert } : x)))}
+                                      >
+                                        {it.translateInvert ? "ON" : "OFF"}
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
-                              );
-                            })}
+                            )}
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
+
+                          {/* Mirror (MISSING in your version) */}
+                          <div className="row" style={{ marginTop: 10 }}>
+                            <div className="col" style={{ minWidth: 140 }}>
+                              <div className="muted">Mirror</div>
+                              <button
+                                  className={`btn ${it.mirrorOn ? "primary" : ""}`}
+                                  disabled={!it.algoId}
+                                  onClick={() => {
+                                    setCombineItems(prev =>
+                                        prev.map((x, idx) => {
+                                          if (idx !== i) return x;
+                                          const on = !x.mirrorOn;
+                                          return on ? { ...x, mirrorOn: true } : { ...x, mirrorOn: false, mirrorAlgoId: "", mirrorPowText: "1", mirrorInvert: false };
+                                        })
+                                    );
+                                    setRemapPick(null);
+                                  }}
+                              >
+                                {it.mirrorOn ? "ON" : "OFF"}
+                              </button>
+                            </div>
+
+                            {it.mirrorOn && (
+                                <div className="col" style={{ flex: 1 }}>
+                                  <div className="muted">Mirror algorithm</div>
+                                  <select
+                                      className="field"
+                                      value={it.mirrorAlgoId}
+                                      onChange={e => {
+                                        const newId = e.target.value as Id | "";
+                                        setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, mirrorAlgoId: newId } : x)));
+                                      }}
+                                  >
+                                    <option value="">(choose…)</option>
+                                    {diagramAlgos.map(a => (
+                                        <option key={a.id} value={a.id}>
+                                          {a.name}
+                                        </option>
+                                    ))}
+                                  </select>
+
+                                  <div className="row" style={{ marginTop: 8 }}>
+                                    <div className="col" style={{ flex: 1 }}>
+                                      <div className="muted">Mirror power</div>
+                                      <input
+                                          className="field"
+                                          inputMode="numeric"
+                                          value={it.mirrorPowText}
+                                          onChange={e => {
+                                            const v = e.target.value;
+                                            if (v === "" || /^[0-9]+$/.test(v)) {
+                                              setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, mirrorPowText: v } : x)));
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            setCombineItems(prev =>
+                                                prev.map((x, idx) => {
+                                                  if (idx !== i) return x;
+                                                  const n = clamp(Math.floor(Number(x.mirrorPowText || "1")), 1, 999);
+                                                  return { ...x, mirrorPowText: String(n) };
+                                                })
+                                            );
+                                          }}
+                                      />
+                                    </div>
+
+                                    <div className="col" style={{ minWidth: 140 }}>
+                                      <div className="muted">Mirror reverse</div>
+                                      <button
+                                          className={`btn ${it.mirrorInvert ? "primary" : ""}`}
+                                          onClick={() => setCombineItems(prev => prev.map((x, idx) => (idx === i ? { ...x, mirrorInvert: !x.mirrorInvert } : x)))}
+                                      >
+                                        {it.mirrorInvert ? "ON" : "OFF"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                            )}
+                          </div>
+                        </>
+                    )}
+
+                  </div>
               ))}
+
             </div>
 
             {!combinePreview.ok && (
@@ -1334,4 +1650,4 @@ function ArrowHead({ x, y, ang }: { x: number; y: number; ang: number }) {
       strokeWidth={1}
     />
   );
-      }
+}
