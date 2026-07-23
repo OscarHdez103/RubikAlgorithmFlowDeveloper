@@ -109,6 +109,8 @@ export function App() {
   // Combine (new UI)
   const [combineItems, setCombineItems] = useState<CombineItem[]>([]);
   const [combineName, setCombineName] = useState("Combined");
+  // Per-loop color overrides for the live combine preview (carried over into the saved algorithm).
+  const [combineLoopColors, setCombineLoopColors] = useState<Record<string, string>>({});
 
   // Remap picking state (click stickers instead of dropdowns)
   const [remapPick, setRemapPick] = useState<{ stepIndex: number; oldId: Id } | null>(null);
@@ -138,11 +140,6 @@ export function App() {
   }, [store.algorithms, selectedDiagram.id]);
 
   const groups = useMemo(() => allSelectableGroups(selectedDiagram), [selectedDiagram]);
-
-  const moveLoops = useMemo(
-    () => (selectedAlgo ? computeMoveLoops(selectedAlgo.moves) : []),
-    [selectedAlgo]
-  );
 
   const combinePreview = useMemo(() => {
     function getAlgoOrFail(id: Id | "", step: number, label: string) {
@@ -415,7 +412,13 @@ export function App() {
     mode === "editAlgorithm"
       ? selectedAlgo
       : mode === "combine"
-        ? ({ id: "preview" as any, diagramId: selectedDiagram.id, name: "preview", moves: combinePreview.moves } as Algorithm)
+        ? ({
+            id: "preview" as any,
+            diagramId: selectedDiagram.id,
+            name: "preview",
+            moves: combinePreview.moves,
+            loopColors: combineLoopColors
+          } as Algorithm)
         : undefined;
 
   return (
@@ -686,59 +689,19 @@ export function App() {
                     Set a custom color per loop, or reset to the auto-assigned color.
                   </div>
 
-                  {moveLoops.length === 0 && (
-                    <div className="muted" style={{ marginTop: 6 }}>No arrows yet.</div>
-                  )}
-
-                  <div className="col" style={{ marginTop: 8 }}>
-                    {moveLoops.map((loop, li) => {
-                      const defaultHex = hslToHex(
-                        defaultLoopColor(li).h,
-                        defaultLoopColor(li).s,
-                        defaultLoopColor(li).l
-                      );
-                      const override = selectedAlgo.loopColors?.[loop.key];
-                      const current = override ?? defaultHex;
-
-                      return (
-                        <div
-                          key={loop.key}
-                          className="row spread"
-                          style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 8 }}
-                        >
-                          <div className="row" style={{ alignItems: "center", gap: 8 }}>
-                            <input
-                              type="color"
-                              value={current}
-                              onChange={e => {
-                                const hex = e.target.value;
-                                updateAlgo(a => {
-                                  a.loopColors = { ...(a.loopColors ?? {}), [loop.key]: hex };
-                                });
-                              }}
-                              title="Loop color"
-                              style={{ width: 32, height: 32, padding: 0, border: "none", background: "none", cursor: "pointer" }}
-                            />
-                            <div>Loop {li + 1}</div>
-                            <span className="badge">x{loop.size}</span>
-                          </div>
-
-                          <button
-                            className="btn"
-                            disabled={!override}
-                            onClick={() => updateAlgo(a => {
-                              if (!a.loopColors) return;
-                              const next = { ...a.loopColors };
-                              delete next[loop.key];
-                              a.loopColors = next;
-                            })}
-                          >
-                            Reset
-                          </button>
-                        </div>
-                      );
+                  <LoopColorEditor
+                    moves={selectedAlgo.moves}
+                    overrides={selectedAlgo.loopColors}
+                    onSetColor={(key, hex) => updateAlgo(a => {
+                      a.loopColors = { ...(a.loopColors ?? {}), [key]: hex };
                     })}
-                  </div>
+                    onResetColor={key => updateAlgo(a => {
+                      if (!a.loopColors) return;
+                      const next = { ...a.loopColors };
+                      delete next[key];
+                      a.loopColors = next;
+                    })}
+                  />
                 </div>
               </>
             ) : (
@@ -797,7 +760,12 @@ export function App() {
                 + Add step
               </button>
 
-              <button className="btn" onClick={() => { setCombineItems([]); setRemapPick(null); }}>Clear</button>
+              <button
+                className="btn"
+                onClick={() => { setCombineItems([]); setRemapPick(null); setCombineLoopColors({}); }}
+              >
+                Clear
+              </button>
             </div>
 
             {combineItems.length === 0 && (
@@ -1221,6 +1189,26 @@ export function App() {
               </div>
             )}
 
+            <div className="col" style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700 }}>Loops (combined result)</div>
+              <div className="muted">
+                Shows how the arrows of the combined result group into loops, and their sizes.
+                Colors here are used on the canvas and carry over when you save.
+              </div>
+
+              <LoopColorEditor
+                moves={combinePreview.moves}
+                overrides={combineLoopColors}
+                onSetColor={(key, hex) => setCombineLoopColors(prev => ({ ...prev, [key]: hex }))}
+                onResetColor={key => setCombineLoopColors(prev => {
+                  const next = { ...prev };
+                  delete next[key];
+                  return next;
+                })}
+                emptyLabel="No steps yet, or the preview isn't valid."
+              />
+            </div>
+
             <div className="row" style={{ marginTop: 12 }}>
               <button
                 className="btn primary"
@@ -1230,7 +1218,8 @@ export function App() {
                     id: uid(),
                     diagramId: selectedDiagram.id,
                     name: combineName.trim() || "Combined",
-                    moves: combinePreview.moves
+                    moves: combinePreview.moves,
+                    loopColors: { ...combineLoopColors }
                   };
                   setStore(prev => {
                     const next = deepClone(prev);
@@ -1649,14 +1638,14 @@ function DiagramCanvas(props: CanvasProps) {
           </filter>
 
           {/*
-            Outlines the *combined* silhouette of whatever is drawn inside the group this
-            filter is applied to (the line path + the arrowhead triangle together), so the
-            border wraps the arrow as a single object with no seam where the head meets the
-            line. feMorphology dilates the shared alpha mask; the black copy is placed behind
-            the original artwork so only a ring around the outside remains visible.
+            Outlines the combined silhouette of whatever is drawn inside the group this filter
+            is applied to (every line, or every arrowhead, drawn together as one batch), so
+            overlapping/touching pieces share one continuous ring with no internal seams.
+            feMorphology dilates the shared alpha mask; the black copy sits behind the
+            original artwork so only a thin ring around the outside remains visible.
           */}
           <filter id="arrowBorder" x="-100%" y="-100%" width="300%" height="300%">
-            <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="dilated" />
+            <feMorphology in="SourceAlpha" operator="dilate" radius="1" result="dilated" />
             <feFlood floodColor="#000000" floodOpacity="0.95" result="blackFlood" />
             <feComposite in="blackFlood" in2="dilated" operator="in" result="blackOutline" />
             <feMerge>
@@ -1666,26 +1655,61 @@ function DiagramCanvas(props: CanvasProps) {
           </filter>
         </defs>
 
-        {paths.map(p => {
-          const active = props.highlightMoveIndex !== null;
-          const isHi = props.highlightMoveIndex === p.i;
+        {/*
+          Rendered in two passes so every arrowhead ends up above every line, no matter which
+          arrow it belongs to. Without this, e.g. with arrows A->B and B->A, the line leaving
+          B (for B->A) would be drawn after and cover the tip of the A->B arrowhead sitting at
+          B (and symmetrically at A) — since both arrows are added/removed independently there
+          is no single per-arrow draw order that keeps a head above a *different* arrow's line.
+          Splitting into "all lines" then "all heads" guarantees it in every case.
+        */}
+        <g filter="url(#glow)">
+          <g filter="url(#arrowBorder)">
+            {paths.map(p => {
+              const active = props.highlightMoveIndex !== null;
+              const isHi = props.highlightMoveIndex === p.i;
 
-          const width = active
-              ? (isHi ? 4.0 : 2.0)
-              : 2.2;
+              const width = active
+                  ? (isHi ? 4.0 : 2.0)
+                  : 2.2;
 
-          const opacity = active ? (isHi ? 1 : 0.6) : 1;
+              const opacity = active ? (isHi ? 1 : 0.6) : 1;
 
-          return (
-              <g key={p.key} filter="url(#glow)" style={{ opacity }}>
-                <g filter="url(#arrowBorder)">
-                  <path d={p.d} fill="none" stroke={p.color} strokeWidth={width} strokeLinecap="round" />
-                  <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} color={p.color} />
-                </g>
-              </g>
-          );
-        })}
+              return (
+                  <path
+                    key={p.key}
+                    d={p.d}
+                    fill="none"
+                    stroke={p.color}
+                    strokeWidth={width}
+                    strokeLinecap="round"
+                    opacity={opacity}
+                  />
+              );
+            })}
+          </g>
+        </g>
 
+        <g filter="url(#glow)">
+          <g filter="url(#arrowBorder)">
+            {paths.map(p => {
+              const active = props.highlightMoveIndex !== null;
+              const isHi = props.highlightMoveIndex === p.i;
+              const opacity = active ? (isHi ? 1 : 0.6) : 1;
+
+              return (
+                  <ArrowHead
+                    key={p.key}
+                    x={p.head.x}
+                    y={p.head.y}
+                    ang={p.head.ang}
+                    color={p.color}
+                    opacity={opacity}
+                  />
+              );
+            })}
+          </g>
+        </g>
       </svg>
 
       {diagram.grids.map(g => (
@@ -1747,7 +1771,11 @@ function DiagramCanvas(props: CanvasProps) {
   );
 }
 
-function ArrowHead({ x, y, ang, color }: { x: number; y: number; ang: number; color: string }) {
+function ArrowHead({
+  x, y, ang, color, opacity
+}: {
+  x: number; y: number; ang: number; color: string; opacity?: number;
+}) {
   const size = 7;
   const a1 = ang + Math.PI * 0.8;
   const a2 = ang - Math.PI * 0.8;
@@ -1756,5 +1784,60 @@ function ArrowHead({ x, y, ang, color }: { x: number; y: number; ang: number; co
   const x2 = x + Math.cos(a2) * size;
   const y2 = y + Math.sin(a2) * size;
 
-  return <path d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`} fill={color} />;
+  return <path d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`} fill={color} opacity={opacity} />;
+}
+
+function LoopColorEditor({
+  moves,
+  overrides,
+  onSetColor,
+  onResetColor,
+  emptyLabel = "No arrows yet."
+}: {
+  moves: { fromGroupId: Id; toGroupId: Id }[];
+  overrides?: Record<string, string>;
+  onSetColor: (key: string, hex: string) => void;
+  onResetColor: (key: string) => void;
+  emptyLabel?: string;
+}) {
+  const loops = useMemo(() => computeMoveLoops(moves), [moves]);
+
+  if (loops.length === 0) {
+    return <div className="muted" style={{ marginTop: 6 }}>{emptyLabel}</div>;
+  }
+
+  return (
+    <div className="col" style={{ marginTop: 8 }}>
+      {loops.map((loop, li) => {
+        const dc = defaultLoopColor(li);
+        const defaultHex = hslToHex(dc.h, dc.s, dc.l);
+        const override = overrides?.[loop.key];
+        const current = override ?? defaultHex;
+
+        return (
+          <div
+            key={loop.key}
+            className="row spread"
+            style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 8 }}
+          >
+            <div className="row" style={{ alignItems: "center", gap: 8 }}>
+              <input
+                type="color"
+                value={current}
+                onChange={e => onSetColor(loop.key, e.target.value)}
+                title="Loop color"
+                style={{ width: 32, height: 32, padding: 0, border: "none", background: "none", cursor: "pointer" }}
+              />
+              <div>Loop {li + 1}</div>
+              <span className="badge">x{loop.size}</span>
+            </div>
+
+            <button className="btn" disabled={!override} onClick={() => onResetColor(loop.key)}>
+              Reset
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
