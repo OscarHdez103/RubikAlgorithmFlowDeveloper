@@ -67,6 +67,86 @@ export function normalizeMoves(diagram: Diagram, moves: { fromGroupId: Id; toGro
   return moves.filter(m => ids.has(m.fromGroupId) && ids.has(m.toGroupId));
 }
 
+// A "loop" is a connected component of the moves graph (edges = fromGroupId -> toGroupId).
+// Arrows usually form closed cycles (A->B->A is size 2, A->B->C->A is size 3, etc.),
+// but this groups by connectivity regardless of whether the component is actually closed yet.
+export type MoveLoop = {
+  key: string;         // stable id derived from the loop's member group ids (sorted)
+  groupIds: Id[];       // all group ids participating in this loop, sorted
+  moveIndices: number[]; // indices into the original moves array belonging to this loop
+  size: number;         // number of arrows in the loop
+};
+
+export function computeMoveLoops(moves: { fromGroupId: Id; toGroupId: Id }[]): MoveLoop[] {
+  const parent = new Map<Id, Id>();
+
+  function find(x: Id): Id {
+    if (!parent.has(x)) parent.set(x, x);
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root) as Id;
+    let cur = x;
+    while (parent.get(cur) !== root) {
+      const next = parent.get(cur) as Id;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+  function union(a: Id, b: Id) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  moves.forEach(m => {
+    find(m.fromGroupId);
+    find(m.toGroupId);
+    union(m.fromGroupId, m.toGroupId);
+  });
+
+  const byRoot = new Map<Id, { groupIds: Set<Id>; moveIndices: number[] }>();
+  const rootOrder: Id[] = [];
+
+  moves.forEach((m, i) => {
+    const root = find(m.fromGroupId);
+    if (!byRoot.has(root)) {
+      byRoot.set(root, { groupIds: new Set(), moveIndices: [] });
+      rootOrder.push(root);
+    }
+    const entry = byRoot.get(root) as { groupIds: Set<Id>; moveIndices: number[] };
+    entry.groupIds.add(m.fromGroupId);
+    entry.groupIds.add(m.toGroupId);
+    entry.moveIndices.push(i);
+  });
+
+  return rootOrder.map(root => {
+    const entry = byRoot.get(root) as { groupIds: Set<Id>; moveIndices: number[] };
+    const groupIds = Array.from(entry.groupIds).sort();
+    return {
+      key: groupIds.join("|"),
+      groupIds,
+      moveIndices: entry.moveIndices,
+      size: entry.moveIndices.length
+    };
+  });
+}
+
+// Golden-angle hue spacing keeps default loop colors maximally distinct no matter how many loops exist.
+export function defaultLoopColor(index: number): { h: number; s: number; l: number } {
+  const hue = (index * 137.508) % 360;
+  return { h: hue, s: 85, l: 62 };
+}
+
+export function hslToHex(h: number, s: number, l: number): string {
+  const sN = s / 100;
+  const lN = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sN * Math.min(lN, 1 - lN);
+  const f = (n: number) => lN - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (x: number) => Math.round(x * 255).toString(16).padStart(2, "0");
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+
 export function validateClosedLoop(moves: { fromGroupId: Id; toGroupId: Id }[]) {
   // Each moved group: outdegree <=1 and indegree <=1 (we enforce in editor)
   // Closed loop requirement for combination: if a group has out, it must have in; and vice-versa.

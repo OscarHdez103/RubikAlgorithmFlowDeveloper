@@ -61,6 +61,9 @@ export type Algorithm = {
   diagramId: Id;
   name: string;
   moves: AlgoMove[];
+  // Optional per-loop color overrides. Keyed by a stable loop key (see computeMoveLoops in utils.ts).
+  // When absent for a loop, a default color is generated automatically.
+  loopColors?: Record<string, string>;
 };
 
 export type StoreData = {

@@ -7,9 +7,12 @@ import {
   applyPermutationPower,
   clamp,
   composePermutations,
+  computeMoveLoops,
   defaultDiagram,
+  defaultLoopColor,
   deepClone,
   findLinkGroupForSticker,
+  hslToHex,
   idx,
   movesToPermutation,
   normalizeMoves,
@@ -135,6 +138,11 @@ export function App() {
   }, [store.algorithms, selectedDiagram.id]);
 
   const groups = useMemo(() => allSelectableGroups(selectedDiagram), [selectedDiagram]);
+
+  const moveLoops = useMemo(
+    () => (selectedAlgo ? computeMoveLoops(selectedAlgo.moves) : []),
+    [selectedAlgo]
+  );
 
   const combinePreview = useMemo(() => {
     function getAlgoOrFail(id: Id | "", step: number, label: string) {
@@ -668,6 +676,68 @@ export function App() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+
+                <div className="col" style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 700 }}>Loops</div>
+                  <div className="muted">
+                    Arrows are grouped by connectivity. A loop A→B→A is size x2, A→B→C→A is size x3, etc.
+                    Set a custom color per loop, or reset to the auto-assigned color.
+                  </div>
+
+                  {moveLoops.length === 0 && (
+                    <div className="muted" style={{ marginTop: 6 }}>No arrows yet.</div>
+                  )}
+
+                  <div className="col" style={{ marginTop: 8 }}>
+                    {moveLoops.map((loop, li) => {
+                      const defaultHex = hslToHex(
+                        defaultLoopColor(li).h,
+                        defaultLoopColor(li).s,
+                        defaultLoopColor(li).l
+                      );
+                      const override = selectedAlgo.loopColors?.[loop.key];
+                      const current = override ?? defaultHex;
+
+                      return (
+                        <div
+                          key={loop.key}
+                          className="row spread"
+                          style={{ borderTop: "1px solid rgba(34,48,87,0.5)", paddingTop: 8 }}
+                        >
+                          <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                            <input
+                              type="color"
+                              value={current}
+                              onChange={e => {
+                                const hex = e.target.value;
+                                updateAlgo(a => {
+                                  a.loopColors = { ...(a.loopColors ?? {}), [loop.key]: hex };
+                                });
+                              }}
+                              title="Loop color"
+                              style={{ width: 32, height: 32, padding: 0, border: "none", background: "none", cursor: "pointer" }}
+                            />
+                            <div>Loop {li + 1}</div>
+                            <span className="badge">x{loop.size}</span>
+                          </div>
+
+                          <button
+                            className="btn"
+                            disabled={!override}
+                            onClick={() => updateAlgo(a => {
+                              if (!a.loopColors) return;
+                              const next = { ...a.loopColors };
+                              delete next[loop.key];
+                              a.loopColors = next;
+                            })}
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -1409,58 +1479,17 @@ function DiagramCanvas(props: CanvasProps) {
     dragRef.current = null;
   }
 
-  // Group moves into their connected "loops" (union-find over fromGroupId/toGroupId)
-  // so every closed loop of arrows gets its own distinct color.
+  // Group moves into their connected "loops" so every closed loop of arrows gets its own
+  // color: a custom one set by the user (algo.loopColors), or an auto-assigned default.
   const moveLoopColors = useMemo(() => {
-    const out = new Map<number, { h: number; s: number; l: number }>();
+    const out = new Map<number, string>();
     if (!algo) return out;
 
-    const parent = new Map<Id, Id>();
-    function find(x: Id): Id {
-      if (!parent.has(x)) parent.set(x, x);
-      let root = x;
-      while (parent.get(root) !== root) root = parent.get(root) as Id;
-      let cur = x;
-      while (parent.get(cur) !== root) {
-        const next = parent.get(cur) as Id;
-        parent.set(cur, root);
-        cur = next;
-      }
-      return root;
-    }
-    function union(a: Id, b: Id) {
-      const ra = find(a);
-      const rb = find(b);
-      if (ra !== rb) parent.set(ra, rb);
-    }
-
-    algo.moves.forEach(m => {
-      find(m.fromGroupId);
-      find(m.toGroupId);
-      union(m.fromGroupId, m.toGroupId);
-    });
-
-    // Assign colors in first-appearance order so they stay stable as moves are added.
-    const rootOrder: Id[] = [];
-    const rootIndex = new Map<Id, number>();
-    algo.moves.forEach(m => {
-      const root = find(m.fromGroupId);
-      if (!rootIndex.has(root)) {
-        rootIndex.set(root, rootOrder.length);
-        rootOrder.push(root);
-      }
-    });
-
-    const colorForRoot = new Map<Id, { h: number; s: number; l: number }>();
-    rootOrder.forEach((root, i) => {
-      // Golden-angle hue spacing keeps colors maximally distinct no matter how many loops exist.
-      const hue = (i * 137.508) % 360;
-      colorForRoot.set(root, { h: hue, s: 85, l: 62 });
-    });
-
-    algo.moves.forEach((m, i) => {
-      const root = find(m.fromGroupId);
-      out.set(i, colorForRoot.get(root) ?? { h: 210, s: 85, l: 62 });
+    const loops = computeMoveLoops(algo.moves);
+    loops.forEach((loop, li) => {
+      const dc = defaultLoopColor(li);
+      const color = algo.loopColors?.[loop.key] ?? `hsl(${dc.h}, ${dc.s}%, ${dc.l}%)`;
+      for (const mi of loop.moveIndices) out.set(mi, color);
     });
 
     return out;
@@ -1540,7 +1569,7 @@ function DiagramCanvas(props: CanvasProps) {
     head: { x: number; y: number; ang: number };
     key: string;
     i: number;
-    color: { h: number; s: number; l: number };
+    color: string;
   }[]>([]);
   useEffect(() => {
     function recompute() {
@@ -1549,7 +1578,7 @@ function DiagramCanvas(props: CanvasProps) {
         head: { x: number; y: number; ang: number };
         key: string;
         i: number;
-        color: { h: number; s: number; l: number };
+        color: string;
       }[] = [];
       const canvasEl = document.getElementById("canvas-root");
       if (!canvasEl) return;
@@ -1587,7 +1616,7 @@ function DiagramCanvas(props: CanvasProps) {
         const ty = y2 - cy2;
         const ang = Math.atan2(ty, tx);
 
-        const color = moveLoopColors.get(a.i) ?? { h: 210, s: 85, l: 62 };
+        const color = moveLoopColors.get(a.i) ?? "hsl(210, 85%, 62%)";
 
         out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color });
       }
@@ -1618,20 +1647,28 @@ function DiagramCanvas(props: CanvasProps) {
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
-        </defs>
 
-        {/*{paths.map(p => (*/}
-        {/*  <g key={p.key} filter="url(#glow)">*/}
-        {/*    <path d={p.d} fill="none" stroke="rgba(106,168,255,0.9)" strokeWidth={2.2} />*/}
-        {/*    <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />*/}
-        {/*  </g>*/}
-        {/*))}*/}
+          {/*
+            Outlines the *combined* silhouette of whatever is drawn inside the group this
+            filter is applied to (the line path + the arrowhead triangle together), so the
+            border wraps the arrow as a single object with no seam where the head meets the
+            line. feMorphology dilates the shared alpha mask; the black copy is placed behind
+            the original artwork so only a ring around the outside remains visible.
+          */}
+          <filter id="arrowBorder" x="-100%" y="-100%" width="300%" height="300%">
+            <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="dilated" />
+            <feFlood floodColor="#000000" floodOpacity="0.95" result="blackFlood" />
+            <feComposite in="blackFlood" in2="dilated" operator="in" result="blackOutline" />
+            <feMerge>
+              <feMergeNode in="blackOutline" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
 
         {paths.map(p => {
           const active = props.highlightMoveIndex !== null;
           const isHi = props.highlightMoveIndex === p.i;
-
-          const { h, s, l } = p.color;
 
           const width = active
               ? (isHi ? 4.0 : 2.0)
@@ -1639,12 +1676,12 @@ function DiagramCanvas(props: CanvasProps) {
 
           const opacity = active ? (isHi ? 1 : 0.6) : 1;
 
-          const stroke = `hsla(${h}, ${s}%, ${l}%, ${isHi ? 0.95 : 0.9})`;
-
           return (
               <g key={p.key} filter="url(#glow)" style={{ opacity }}>
-                <path d={p.d} fill="none" stroke={stroke} strokeWidth={width} />
-                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} h={h} s={s} l={l} />
+                <g filter="url(#arrowBorder)">
+                  <path d={p.d} fill="none" stroke={p.color} strokeWidth={width} strokeLinecap="round" />
+                  <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} color={p.color} />
+                </g>
               </g>
           );
         })}
@@ -1710,7 +1747,7 @@ function DiagramCanvas(props: CanvasProps) {
   );
 }
 
-function ArrowHead({ x, y, ang, h, s, l }: { x: number; y: number; ang: number; h: number; s: number; l: number }) {
+function ArrowHead({ x, y, ang, color }: { x: number; y: number; ang: number; color: string }) {
   const size = 7;
   const a1 = ang + Math.PI * 0.8;
   const a2 = ang - Math.PI * 0.8;
@@ -1719,12 +1756,5 @@ function ArrowHead({ x, y, ang, h, s, l }: { x: number; y: number; ang: number; 
   const x2 = x + Math.cos(a2) * size;
   const y2 = y + Math.sin(a2) * size;
 
-  return (
-    <path
-      d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`}
-      fill={`hsla(${h}, ${s}%, ${l}%, 0.95)`}
-      stroke="rgba(0,0,0,0.25)"
-      strokeWidth={1}
-    />
-  );
+  return <path d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`} fill={color} />;
 }
