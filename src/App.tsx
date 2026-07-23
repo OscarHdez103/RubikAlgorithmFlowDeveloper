@@ -116,6 +116,19 @@ export function App() {
   const [remapPick, setRemapPick] = useState<{ stepIndex: number; oldId: Id } | null>(null);
 
   const [highlightMoveIndex, setHighlightMoveIndex] = useState<number | null>(null);
+  // Which loop (by its stable key) is currently being "shown" via the Loops list. Mutually
+  // exclusive with highlightMoveIndex — turning one on turns the other off.
+  const [highlightLoopKey, setHighlightLoopKey] = useState<string | null>(null);
+
+  function toggleHighlightMove(i: number) {
+    setHighlightMoveIndex(prev => (prev === i ? null : i));
+    setHighlightLoopKey(null);
+  }
+
+  function toggleHighlightLoop(key: string) {
+    setHighlightLoopKey(prev => (prev === key ? null : key));
+    setHighlightMoveIndex(null);
+  }
 
   // Persist
   useEffect(() => {
@@ -304,6 +317,7 @@ export function App() {
     setSelectedAlgoId(a.id);
     setMode("editAlgorithm");
     setHighlightMoveIndex(null);
+    setHighlightLoopKey(null);
     setMoveFrom("");
   }
 
@@ -315,6 +329,7 @@ export function App() {
     });
     if (selectedAlgoId === id) setSelectedAlgoId(undefined);
     setMoveFrom("");
+    setHighlightLoopKey(null);
     setHighlightMoveIndex(null);
   }
 
@@ -606,6 +621,7 @@ export function App() {
                     setMoveFrom("");
                     setMoveFromSticker(null);
                     setHighlightMoveIndex(null);
+                    setHighlightLoopKey(null);
                   }}
                 >
                   <option value="">(none)</option>
@@ -662,7 +678,7 @@ export function App() {
                         <div className="row">
                           <button
                               className={`btn ${highlightMoveIndex === i ? "primary" : ""}`}
-                              onClick={() => setHighlightMoveIndex(prev => (prev === i ? null : i))}
+                              onClick={() => toggleHighlightMove(i)}
                           >
                             {highlightMoveIndex === i ? "Showing" : "Show"}
                           </button>
@@ -671,6 +687,7 @@ export function App() {
                               className="btn danger"
                               onClick={() => {
                                 deleteMove(i);
+                                setHighlightLoopKey(null);
                                 setHighlightMoveIndex(prev => (prev === i ? null : prev !== null && prev > i ? prev - 1 : prev));
                               }}
                           >
@@ -701,6 +718,8 @@ export function App() {
                       delete next[key];
                       a.loopColors = next;
                     })}
+                    highlightedKey={highlightLoopKey}
+                    onToggleHighlight={toggleHighlightLoop}
                   />
                 </div>
               </>
@@ -1206,6 +1225,8 @@ export function App() {
                   return next;
                 })}
                 emptyLabel="No steps yet, or the preview isn't valid."
+                highlightedKey={highlightLoopKey}
+                onToggleHighlight={toggleHighlightLoop}
               />
             </div>
 
@@ -1291,6 +1312,7 @@ export function App() {
           moveFromSticker={moveFromSticker}
           setMoveFromSticker={setMoveFromSticker}
           highlightMoveIndex={mode === "editAlgorithm" ? highlightMoveIndex : null}
+          highlightLoopKey={mode === "editAlgorithm" || mode === "combine" ? highlightLoopKey : null}
           remapPick={remapPick}
           setRemapPick={setRemapPick}
           applyRemapTarget={(stepIndex, oldId, targetId) => {
@@ -1323,6 +1345,7 @@ type CanvasProps = {
   addMoveByGroup: (fromId: Id, toId: Id, fromSticker: StickerRef, toSticker: StickerRef) => void;
 
   highlightMoveIndex: number | null;
+  highlightLoopKey: string | null;
 
   remapPick: { stepIndex: number; oldId: Id } | null;
   setRemapPick: React.Dispatch<React.SetStateAction<{ stepIndex: number; oldId: Id } | null>>;
@@ -1469,16 +1492,17 @@ function DiagramCanvas(props: CanvasProps) {
   }
 
   // Group moves into their connected "loops" so every closed loop of arrows gets its own
-  // color: a custom one set by the user (algo.loopColors), or an auto-assigned default.
-  const moveLoopColors = useMemo(() => {
-    const out = new Map<number, string>();
+  // color (custom via algo.loopColors, or an auto-assigned default) and a stable loop key,
+  // used both for coloring and for the per-loop "Show" highlight.
+  const moveLoopInfo = useMemo(() => {
+    const out = new Map<number, { color: string; loopKey: string }>();
     if (!algo) return out;
 
     const loops = computeMoveLoops(algo.moves);
     loops.forEach((loop, li) => {
       const dc = defaultLoopColor(li);
       const color = algo.loopColors?.[loop.key] ?? `hsl(${dc.h}, ${dc.s}%, ${dc.l}%)`;
-      for (const mi of loop.moveIndices) out.set(mi, color);
+      for (const mi of loop.moveIndices) out.set(mi, { color, loopKey: loop.key });
     });
 
     return out;
@@ -1559,6 +1583,7 @@ function DiagramCanvas(props: CanvasProps) {
     key: string;
     i: number;
     color: string;
+    loopKey: string;
   }[]>([]);
   useEffect(() => {
     function recompute() {
@@ -1568,6 +1593,7 @@ function DiagramCanvas(props: CanvasProps) {
         key: string;
         i: number;
         color: string;
+        loopKey: string;
       }[] = [];
       const canvasEl = document.getElementById("canvas-root");
       if (!canvasEl) return;
@@ -1605,9 +1631,11 @@ function DiagramCanvas(props: CanvasProps) {
         const ty = y2 - cy2;
         const ang = Math.atan2(ty, tx);
 
-        const color = moveLoopColors.get(a.i) ?? "hsl(210, 85%, 62%)";
+        const info = moveLoopInfo.get(a.i);
+        const color = info?.color ?? "hsl(210, 85%, 62%)";
+        const loopKey = info?.loopKey ?? "";
 
-        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color });
+        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color, loopKey });
       }
 
       setPaths(out);
@@ -1617,7 +1645,19 @@ function DiagramCanvas(props: CanvasProps) {
     const onResize = () => recompute();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [arrowSegments, diagram, moveLoopColors]);
+  }, [arrowSegments, diagram, moveLoopInfo]);
+
+  // Highlighting: either a single arrow ("Show" on a move) or a whole loop ("Show" on a
+  // loop) can be active at once. Non-highlighted arrows fade to near-invisible so the
+  // highlighted one(s) are unambiguous.
+  const highlightActive = props.highlightMoveIndex !== null || props.highlightLoopKey !== null;
+  const DIM_OPACITY = 0.08;
+
+  function isPathHighlighted(p: { i: number; loopKey: string }) {
+    if (props.highlightMoveIndex !== null) return props.highlightMoveIndex === p.i;
+    if (props.highlightLoopKey !== null) return props.highlightLoopKey === p.loopKey;
+    return false;
+  }
 
   return (
     <div
@@ -1666,14 +1706,13 @@ function DiagramCanvas(props: CanvasProps) {
         <g filter="url(#glow)">
           <g filter="url(#arrowBorder)">
             {paths.map(p => {
-              const active = props.highlightMoveIndex !== null;
-              const isHi = props.highlightMoveIndex === p.i;
+              const isHi = isPathHighlighted(p);
 
-              const width = active
-                  ? (isHi ? 4.0 : 2.0)
+              const width = highlightActive
+                  ? (isHi ? 4.0 : 1.4)
                   : 2.2;
 
-              const opacity = active ? (isHi ? 1 : 0.6) : 1;
+              const opacity = highlightActive ? (isHi ? 1 : DIM_OPACITY) : 1;
 
               return (
                   <path
@@ -1693,9 +1732,8 @@ function DiagramCanvas(props: CanvasProps) {
         <g filter="url(#glow)">
           <g filter="url(#arrowBorder)">
             {paths.map(p => {
-              const active = props.highlightMoveIndex !== null;
-              const isHi = props.highlightMoveIndex === p.i;
-              const opacity = active ? (isHi ? 1 : 0.6) : 1;
+              const isHi = isPathHighlighted(p);
+              const opacity = highlightActive ? (isHi ? 1 : DIM_OPACITY) : 1;
 
               return (
                   <ArrowHead
@@ -1792,13 +1830,17 @@ function LoopColorEditor({
   overrides,
   onSetColor,
   onResetColor,
-  emptyLabel = "No arrows yet."
+  emptyLabel = "No arrows yet.",
+  highlightedKey,
+  onToggleHighlight
 }: {
   moves: { fromGroupId: Id; toGroupId: Id }[];
   overrides?: Record<string, string>;
   onSetColor: (key: string, hex: string) => void;
   onResetColor: (key: string) => void;
   emptyLabel?: string;
+  highlightedKey?: string | null;
+  onToggleHighlight?: (key: string) => void;
 }) {
   const loops = useMemo(() => computeMoveLoops(moves), [moves]);
 
@@ -1813,6 +1855,7 @@ function LoopColorEditor({
         const defaultHex = hslToHex(dc.h, dc.s, dc.l);
         const override = overrides?.[loop.key];
         const current = override ?? defaultHex;
+        const isShowing = highlightedKey === loop.key;
 
         return (
           <div
@@ -1829,6 +1872,16 @@ function LoopColorEditor({
                 style={{ width: 32, height: 32, padding: 0, border: "none", background: "none", cursor: "pointer" }}
               />
               <div>Loop {li + 1}</div>
+
+              {onToggleHighlight && (
+                <button
+                  className={`btn ${isShowing ? "primary" : ""}`}
+                  onClick={() => onToggleHighlight(loop.key)}
+                >
+                  {isShowing ? "Showing" : "Show"}
+                </button>
+              )}
+
               <span className="badge">x{loop.size}</span>
             </div>
 
