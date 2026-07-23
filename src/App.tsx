@@ -1409,6 +1409,63 @@ function DiagramCanvas(props: CanvasProps) {
     dragRef.current = null;
   }
 
+  // Group moves into their connected "loops" (union-find over fromGroupId/toGroupId)
+  // so every closed loop of arrows gets its own distinct color.
+  const moveLoopColors = useMemo(() => {
+    const out = new Map<number, { h: number; s: number; l: number }>();
+    if (!algo) return out;
+
+    const parent = new Map<Id, Id>();
+    function find(x: Id): Id {
+      if (!parent.has(x)) parent.set(x, x);
+      let root = x;
+      while (parent.get(root) !== root) root = parent.get(root) as Id;
+      let cur = x;
+      while (parent.get(cur) !== root) {
+        const next = parent.get(cur) as Id;
+        parent.set(cur, root);
+        cur = next;
+      }
+      return root;
+    }
+    function union(a: Id, b: Id) {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(ra, rb);
+    }
+
+    algo.moves.forEach(m => {
+      find(m.fromGroupId);
+      find(m.toGroupId);
+      union(m.fromGroupId, m.toGroupId);
+    });
+
+    // Assign colors in first-appearance order so they stay stable as moves are added.
+    const rootOrder: Id[] = [];
+    const rootIndex = new Map<Id, number>();
+    algo.moves.forEach(m => {
+      const root = find(m.fromGroupId);
+      if (!rootIndex.has(root)) {
+        rootIndex.set(root, rootOrder.length);
+        rootOrder.push(root);
+      }
+    });
+
+    const colorForRoot = new Map<Id, { h: number; s: number; l: number }>();
+    rootOrder.forEach((root, i) => {
+      // Golden-angle hue spacing keeps colors maximally distinct no matter how many loops exist.
+      const hue = (i * 137.508) % 360;
+      colorForRoot.set(root, { h: hue, s: 85, l: 62 });
+    });
+
+    algo.moves.forEach((m, i) => {
+      const root = find(m.fromGroupId);
+      out.set(i, colorForRoot.get(root) ?? { h: 210, s: 85, l: 62 });
+    });
+
+    return out;
+  }, [algo]);
+
   const arrowSegments = useMemo(() => {
     if (!algo) return [];
     const gs = allSelectableGroups(diagram);
@@ -1478,10 +1535,22 @@ function DiagramCanvas(props: CanvasProps) {
     return arrows;
   }, [algo, diagram]);
 
-  const [paths, setPaths] = useState<{ d: string; head: { x: number; y: number; ang: number }; key: string; i: number }[]>([]);
+  const [paths, setPaths] = useState<{
+    d: string;
+    head: { x: number; y: number; ang: number };
+    key: string;
+    i: number;
+    color: { h: number; s: number; l: number };
+  }[]>([]);
   useEffect(() => {
     function recompute() {
-      const out: { d: string; head: { x: number; y: number; ang: number }; key: string; i: number }[] = [];
+      const out: {
+        d: string;
+        head: { x: number; y: number; ang: number };
+        key: string;
+        i: number;
+        color: { h: number; s: number; l: number };
+      }[] = [];
       const canvasEl = document.getElementById("canvas-root");
       if (!canvasEl) return;
       const canvasRect = canvasEl.getBoundingClientRect();
@@ -1518,7 +1587,9 @@ function DiagramCanvas(props: CanvasProps) {
         const ty = y2 - cy2;
         const ang = Math.atan2(ty, tx);
 
-        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i });
+        const color = moveLoopColors.get(a.i) ?? { h: 210, s: 85, l: 62 };
+
+        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color });
       }
 
       setPaths(out);
@@ -1528,7 +1599,7 @@ function DiagramCanvas(props: CanvasProps) {
     const onResize = () => recompute();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [arrowSegments, diagram]);
+  }, [arrowSegments, diagram, moveLoopColors]);
 
   return (
     <div
@@ -1560,20 +1631,26 @@ function DiagramCanvas(props: CanvasProps) {
           const active = props.highlightMoveIndex !== null;
           const isHi = props.highlightMoveIndex === p.i;
 
-          const stroke = active
-              ? (isHi ? "rgba(255,255,255,0.95)" : "rgba(106,168,255,0.18)")
-              : "rgba(106,168,255,0.9)";
+          const { h, s, l } = p.color;
 
           const width = active
               ? (isHi ? 4.0 : 2.0)
               : 2.2;
 
-          const opacity = active ? (isHi ? 1 : 0.6) : 1;
+          const opacity = active ? (isHi ? 1 : 0.35) : 1;
+
+          const mainStroke = `hsla(${h}, ${s}%, ${l}%, ${opacity})`;
+          // Double halo (light outer ring + dark inner ring) keeps every arrow
+          // readable no matter what sticker color sits behind it.
+          const haloStroke = `hsla(0, 0%, 100%, ${0.55 * opacity})`;
+          const borderStroke = `hsla(0, 0%, 0%, ${0.85 * opacity})`;
 
           return (
-              <g key={p.key} filter="url(#glow)" style={{ opacity }}>
-                <path d={p.d} fill="none" stroke={stroke} strokeWidth={width} />
-                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} />
+              <g key={p.key} filter="url(#glow)">
+                <path d={p.d} fill="none" stroke={haloStroke} strokeWidth={width + 4.4} strokeLinecap="round" />
+                <path d={p.d} fill="none" stroke={borderStroke} strokeWidth={width + 2.2} strokeLinecap="round" />
+                <path d={p.d} fill="none" stroke={mainStroke} strokeWidth={width} strokeLinecap="round" />
+                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} h={h} s={s} l={l} opacity={opacity} />
               </g>
           );
         })}
@@ -1639,21 +1716,29 @@ function DiagramCanvas(props: CanvasProps) {
   );
 }
 
-function ArrowHead({ x, y, ang }: { x: number; y: number; ang: number }) {
+function ArrowHead({
+  x, y, ang, h, s, l, opacity
+}: {
+  x: number; y: number; ang: number; h: number; s: number; l: number; opacity: number;
+}) {
   const size = 7;
-  const a1 = ang + Math.PI * 0.8;
-  const a2 = ang - Math.PI * 0.8;
-  const x1 = x + Math.cos(a1) * size;
-  const y1 = y + Math.sin(a1) * size;
-  const x2 = x + Math.cos(a2) * size;
-  const y2 = y + Math.sin(a2) * size;
+
+  function trianglePath(sz: number) {
+    const a1 = ang + Math.PI * 0.8;
+    const a2 = ang - Math.PI * 0.8;
+    const x1 = x + Math.cos(a1) * sz;
+    const y1 = y + Math.sin(a1) * sz;
+    const x2 = x + Math.cos(a2) * sz;
+    const y2 = y + Math.sin(a2) * sz;
+    return `M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`;
+  }
 
   return (
-    <path
-      d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`}
-      fill="rgba(106,168,255,0.95)"
-      stroke="rgba(0,0,0,0.25)"
-      strokeWidth={1}
-    />
+    <>
+      {/* Halo + dark ring behind the tip, matching the line's border treatment */}
+      <path d={trianglePath(size + 3)} fill={`hsla(0, 0%, 100%, ${0.55 * opacity})`} />
+      <path d={trianglePath(size + 1.4)} fill={`hsla(0, 0%, 0%, ${0.85 * opacity})`} />
+      <path d={trianglePath(size)} fill={`hsla(${h}, ${s}%, ${l}%, ${opacity})`} />
+    </>
   );
 }
