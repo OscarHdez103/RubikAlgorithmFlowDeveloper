@@ -1637,20 +1637,14 @@ function DiagramCanvas(props: CanvasProps) {
               ? (isHi ? 4.0 : 2.0)
               : 2.2;
 
-          const opacity = active ? (isHi ? 1 : 0.35) : 1;
+          const opacity = active ? (isHi ? 1 : 0.6) : 1;
 
-          const mainStroke = `hsla(${h}, ${s}%, ${l}%, ${opacity})`;
-          // Double halo (light outer ring + dark inner ring) keeps every arrow
-          // readable no matter what sticker color sits behind it.
-          const haloStroke = `hsla(0, 0%, 100%, ${0.55 * opacity})`;
-          const borderStroke = `hsla(0, 0%, 0%, ${0.85 * opacity})`;
+          const stroke = `hsla(${h}, ${s}%, ${l}%, ${isHi ? 0.95 : 0.9})`;
 
           return (
-              <g key={p.key} filter="url(#glow)">
-                <path d={p.d} fill="none" stroke={haloStroke} strokeWidth={width + 4.4} strokeLinecap="round" />
-                <path d={p.d} fill="none" stroke={borderStroke} strokeWidth={width + 2.2} strokeLinecap="round" />
-                <path d={p.d} fill="none" stroke={mainStroke} strokeWidth={width} strokeLinecap="round" />
-                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} h={h} s={s} l={l} opacity={opacity} />
+              <g key={p.key} filter="url(#glow)" style={{ opacity }}>
+                <path d={p.d} fill="none" stroke={stroke} strokeWidth={width} />
+                <ArrowHead x={p.head.x} y={p.head.y} ang={p.head.ang} h={h} s={s} l={l} />
               </g>
           );
         })}
@@ -1716,29 +1710,21 @@ function DiagramCanvas(props: CanvasProps) {
   );
 }
 
-function ArrowHead({
-  x, y, ang, h, s, l, opacity
-}: {
-  x: number; y: number; ang: number; h: number; s: number; l: number; opacity: number;
-}) {
+function ArrowHead({ x, y, ang, h, s, l }: { x: number; y: number; ang: number; h: number; s: number; l: number }) {
   const size = 7;
-
-  function trianglePath(sz: number) {
-    const a1 = ang + Math.PI * 0.8;
-    const a2 = ang - Math.PI * 0.8;
-    const x1 = x + Math.cos(a1) * sz;
-    const y1 = y + Math.sin(a1) * sz;
-    const x2 = x + Math.cos(a2) * sz;
-    const y2 = y + Math.sin(a2) * sz;
-    return `M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`;
-  }
+  const a1 = ang + Math.PI * 0.8;
+  const a2 = ang - Math.PI * 0.8;
+  const x1 = x + Math.cos(a1) * size;
+  const y1 = y + Math.sin(a1) * size;
+  const x2 = x + Math.cos(a2) * size;
+  const y2 = y + Math.sin(a2) * size;
 
   return (
-    <>
-      {/* Halo + dark ring behind the tip, matching the line's border treatment */}
-      <path d={trianglePath(size + 3)} fill={`hsla(0, 0%, 100%, ${0.55 * opacity})`} />
-      <path d={trianglePath(size + 1.4)} fill={`hsla(0, 0%, 0%, ${0.85 * opacity})`} />
-      <path d={trianglePath(size)} fill={`hsla(${h}, ${s}%, ${l}%, ${opacity})`} />
-    </>
+    <path
+      d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`}
+      fill={`hsla(${h}, ${s}%, ${l}%, 0.95)`}
+      stroke="rgba(0,0,0,0.25)"
+      strokeWidth={1}
+    />
   );
 }
