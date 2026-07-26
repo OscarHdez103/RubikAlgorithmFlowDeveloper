@@ -78,6 +78,8 @@ export function App() {
   const [store, setStore] = useState<StoreData>(() => loadStore());
   const [mode, setMode] = useState<Mode>("editDiagram");
   const [tool, setTool] = useState<Tool>("paint");
+  // Configuration menu (sidebar) collapse — gives more room to the diagram on small screens.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [selectedDiagramId, setSelectedDiagramId] = useState<Id>(() => store.ui.lastDiagramId ?? store.diagrams[0].id);
   const selectedDiagram = useMemo(
@@ -437,7 +439,7 @@ export function App() {
         : undefined;
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarCollapsed ? "sidebarCollapsed" : ""}`}>
       <div className="sidebar">
         <div className="header">
           <div className="col">
@@ -1281,6 +1283,15 @@ export function App() {
         </div>
       </div>
 
+      <button
+        className="sidebarToggle"
+        onClick={() => setSidebarCollapsed(v => !v)}
+        title={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+        aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+      >
+        {sidebarCollapsed ? "☰" : "✕"}
+      </button>
+
       <div className="canvasWrap">
         <DiagramCanvas
           diagram={selectedDiagram}
@@ -1352,8 +1363,35 @@ type CanvasProps = {
   applyRemapTarget: (stepIndex: number, oldId: Id, targetId: Id) => void;
 };
 
+const MIN_VIEW_SCALE = 0.25;
+const MAX_VIEW_SCALE = 4;
+
 function DiagramCanvas(props: CanvasProps) {
   const { diagram, algo, tool, paintColor } = props;
+
+  // Pan/zoom viewport state for the grids layer. Purely a view concern (not persisted with
+  // the diagram): translate + scale applied to a wrapper around the grids only, while the
+  // arrow SVG overlay stays in the stable, untransformed frame (see render below).
+  const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
+
+  // Reset the view whenever a different diagram is opened, so an old pan/zoom doesn't leave
+  // the new diagram's grids scrolled out of view.
+  useEffect(() => {
+    setView({ x: 0, y: 0, scale: 1 });
+  }, [diagram.id]);
+
+  // Background pan (single pointer) and pinch-zoom (two pointers) tracking.
+  const activePointers = useRef(new Map<number, { x: number; y: number }>());
+  const panState = useRef<{ pointerId: number; startX: number; startY: number; startViewX: number; startViewY: number } | null>(null);
+  const pinchState = useRef<{ contentX: number; contentY: number; initialDist: number; initialScale: number } | null>(null);
+
+  function isInsideGrid(target: EventTarget | null) {
+    return !!(target as HTMLElement | null)?.closest?.(".grid");
+  }
+
+  function pointerDist(a: { x: number; y: number }, b: { x: number; y: number }) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
 
   // Dragging grids (always enabled)
   const dragRef = useRef<{
@@ -1473,8 +1511,10 @@ function DiagramCanvas(props: CanvasProps) {
     if (!dr) return;
     if (e.pointerId !== dr.pointerId) return;
 
-    const dx = e.clientX - dr.startX;
-    const dy = e.clientY - dr.startY;
+    // Grids live inside the pan/zoom-scaled wrapper, so a raw screen-pixel delta needs to be
+    // converted back to that wrapper's local units for the drag to track the cursor 1:1.
+    const dx = (e.clientX - dr.startX) / view.scale;
+    const dy = (e.clientY - dr.startY) / view.scale;
 
     props.updateDiagram(d => {
       const g = d.grids.find(x => x.id === dr.gridId);
@@ -1489,6 +1529,116 @@ function DiagramCanvas(props: CanvasProps) {
     if (!dr) return;
     if (e.pointerId !== dr.pointerId) return;
     dragRef.current = null;
+  }
+
+  // --- Canvas background pan (drag) and pinch-zoom (two fingers) ---
+
+  function onCanvasPointerDown(e: React.PointerEvent) {
+    // Clicks/taps inside a grid are handled by onGridPointerDown (drag the grid) or a
+    // sticker's own onClick — never start a background pan/pinch for those.
+    if (isInsideGrid(e.target)) return;
+
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.current.size === 1) {
+      pinchState.current = null;
+      panState.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startViewX: view.x,
+        startViewY: view.y
+      };
+    } else if (activePointers.current.size === 2) {
+      panState.current = null;
+      const pts = Array.from(activePointers.current.values());
+      const rect = (document.getElementById("canvas-root"))?.getBoundingClientRect();
+      if (rect) {
+        const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
+        const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
+        pinchState.current = {
+          contentX: (midX - view.x) / view.scale,
+          contentY: (midY - view.y) / view.scale,
+          initialDist: pointerDist(pts[0], pts[1]),
+          initialScale: view.scale
+        };
+      }
+    }
+  }
+
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    // Existing grid-drag logic (no-op unless a grid drag is in progress).
+    onGridPointerMove(e);
+
+    if (!activePointers.current.has(e.pointerId)) return;
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pinchState.current && activePointers.current.size >= 2) {
+      const pts = Array.from(activePointers.current.values()).slice(0, 2);
+      const rect = document.getElementById("canvas-root")?.getBoundingClientRect();
+      if (!rect) return;
+
+      const { contentX, contentY, initialDist, initialScale } = pinchState.current;
+      const curDist = pointerDist(pts[0], pts[1]) || 1;
+      const newScale = clamp(initialScale * (curDist / initialDist), MIN_VIEW_SCALE, MAX_VIEW_SCALE);
+
+      const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
+      const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
+
+      setView({
+        x: midX - contentX * newScale,
+        y: midY - contentY * newScale,
+        scale: newScale
+      });
+    } else if (panState.current && panState.current.pointerId === e.pointerId) {
+      const ps = panState.current;
+      const dx = e.clientX - ps.startX;
+      const dy = e.clientY - ps.startY;
+      setView(v => ({ ...v, x: ps.startViewX + dx, y: ps.startViewY + dy }));
+    }
+  }
+
+  function onCanvasPointerUp(e: React.PointerEvent) {
+    onGridPointerUp(e);
+
+    activePointers.current.delete(e.pointerId);
+
+    if (panState.current?.pointerId === e.pointerId) {
+      panState.current = null;
+    }
+
+    if (pinchState.current) {
+      pinchState.current = null;
+      // If one finger is still down, resume a fresh single-finger pan anchored at its
+      // current position so there's no jump when the second finger lifts.
+      const remaining = Array.from(activePointers.current.entries());
+      if (remaining.length === 1) {
+        const [pointerId, pos] = remaining[0];
+        panState.current = { pointerId, startX: pos.x, startY: pos.y, startViewX: view.x, startViewY: view.y };
+      }
+    }
+  }
+
+  function onCanvasWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    const rect = document.getElementById("canvas-root")?.getBoundingClientRect();
+    if (!rect) return;
+
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    setView(prev => {
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const newScale = clamp(prev.scale * factor, MIN_VIEW_SCALE, MAX_VIEW_SCALE);
+      const contentX = (px - prev.x) / prev.scale;
+      const contentY = (py - prev.y) / prev.scale;
+      return {
+        x: px - contentX * newScale,
+        y: py - contentY * newScale,
+        scale: newScale
+      };
+    });
   }
 
   // Group moves into their connected "loops" so every closed loop of arrows gets its own
@@ -1645,7 +1795,9 @@ function DiagramCanvas(props: CanvasProps) {
     const onResize = () => recompute();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [arrowSegments, diagram, moveLoopInfo]);
+    // view.x/y/scale: the SVG overlay stays in the stable frame while the grids pan/zoom
+    // underneath it, so arrow positions must be recomputed whenever the view changes.
+  }, [arrowSegments, diagram, moveLoopInfo, view.x, view.y, view.scale]);
 
   // Highlighting: either a single arrow ("Show" on a move) or a whole loop ("Show" on a
   // loop) can be active at once. Non-highlighted arrows fade to near-invisible so the
@@ -1663,10 +1815,18 @@ function DiagramCanvas(props: CanvasProps) {
     <div
       id="canvas-root"
       className="canvas"
-      onPointerMove={onGridPointerMove}
-      onPointerUp={onGridPointerUp}
-      onPointerCancel={onGridPointerUp}
+      onPointerDown={onCanvasPointerDown}
+      onPointerMove={onCanvasPointerMove}
+      onPointerUp={onCanvasPointerUp}
+      onPointerCancel={onCanvasPointerUp}
+      onWheel={onCanvasWheel}
     >
+      {/*
+        Arrow overlay stays in this stable, untransformed frame — it's positioned purely from
+        live sticker screen coordinates (see recompute() above), so it doesn't need its own
+        pan/zoom transform; it just tracks wherever the (separately transformed) grids below
+        actually end up on screen.
+      */}
       <svg className="arrowLayer" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         <defs>
           <filter id="glow">
@@ -1750,6 +1910,12 @@ function DiagramCanvas(props: CanvasProps) {
         </g>
       </svg>
 
+      {/* Pan/zoom lives here: translating/scaling this wrapper moves the grids without
+          touching the arrow overlay above, or the grids' own local x/y coordinates. */}
+      <div
+        className="canvasContent"
+        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: "0 0" }}
+      >
       {diagram.grids.map(g => (
         <div
           key={g.id}
@@ -1805,6 +1971,7 @@ function DiagramCanvas(props: CanvasProps) {
           </div>
         </div>
       ))}
+      </div>
     </div>
   );
 }
