@@ -1366,6 +1366,13 @@ type CanvasProps = {
 const MIN_VIEW_SCALE = 0.25;
 const MAX_VIEW_SCALE = 4;
 
+// Half-thickness of the black outline drawn around each arrow, in px.
+const ARROW_BORDER = 1.1;
+// How far the arrowhead extends back from its tip. The shaft is trimmed by this much so it
+// ends inside the head rather than running past its point.
+const ARROW_HEAD_SIZE = 7;
+const ARROW_HEAD_BASE = ARROW_HEAD_SIZE * Math.abs(Math.cos(Math.PI * 0.8));
+
 function DiagramCanvas(props: CanvasProps) {
   const { diagram, algo, tool, paintColor } = props;
 
@@ -1803,11 +1810,24 @@ function DiagramCanvas(props: CanvasProps) {
       const cx2 = x1 + dx * 0.65 + nx * offset;
       const cy2 = y1 + dy * 0.65 + ny * offset;
 
-      const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
-
+      // Direction the arrow arrives from (also the arrowhead's facing).
       const tx = x2 - cx2;
       const ty = y2 - cy2;
-      const ang = Math.atan2(ty, tx);
+      const tlen = Math.hypot(tx, ty) || 1;
+      const ux = tx / tlen;
+      const uy = ty / tlen;
+
+      // Stop the shaft at the arrowhead's base instead of running it all the way to the tip.
+      // The shaft now carries a black outline stroke, and a round cap at the tip would poke
+      // out past the point of the head as a little black nub. Pulling the end back along the
+      // arrival direction keeps the curve's tangent (and so the head's angle) identical.
+      const trim = Math.min(ARROW_HEAD_BASE, tlen * 0.4);
+      const ex = x2 - ux * trim;
+      const ey = y2 - uy * trim;
+
+      const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${ex} ${ey}`;
+
+      const ang = Math.atan2(uy, ux);
 
       const info = moveLoopInfo.get(a.i);
       const color = info?.color ?? "hsl(210, 85%, 62%)";
@@ -1867,6 +1887,16 @@ function DiagramCanvas(props: CanvasProps) {
     return false;
   }
 
+  function strokeWidthFor(p: { i: number; loopKey: string }) {
+    if (!highlightActive) return 2.2;
+    return isPathHighlighted(p) ? 4.0 : 1.4;
+  }
+
+  function opacityFor(p: { i: number; loopKey: string }) {
+    if (!highlightActive) return 1;
+    return isPathHighlighted(p) ? 1 : DIM_OPACITY;
+  }
+
   return (
     <div
       id="canvas-root"
@@ -1885,93 +1915,80 @@ function DiagramCanvas(props: CanvasProps) {
       */}
       <svg className="arrowLayer" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         {/*
-          Both filters use filterUnits="userSpaceOnUse" with the region sized off the SVG's
-          own viewport rather than the default objectBoundingBox (relative to whatever's being
-          filtered). objectBoundingBox regions can go degenerate — and some browsers respond by
-          flooding the entire filter region solid black — when the filtered group's content
-          bounding box is momentarily zero/weird, e.g. mid-way through the sidebar-collapse
-          layout transition. Sizing off the stable viewport avoids that failure mode entirely.
+          Drawn as four flat passes, with NO SVG filters anywhere.
+
+          Why no filters: the border used to be an feMorphology/feFlood/feComposite chain. A
+          black feFlood paints the filter's ENTIRE region and is only kept in check by the
+          composite that clips it down to the dilated shape. If a browser fails to render that
+          chain — which is what happens on mobile when the sidebar-collapse layout change
+          forces the overlay to re-rasterise — the clip is lost and the flood paints its whole
+          region solid black, blanking the canvas. Filters also allocate large offscreen
+          buffers that mobile GPUs can refuse outright. Drawing the outline as real geometry
+          means there is no black fill that can ever escape its own shape, so that failure is
+          impossible by construction rather than merely made less likely.
+
+          Why four passes, in this order:
+            1. every shaft, thick + black    (outline)
+            2. every head,  black + stroked  (outline)
+            3. every shaft, thin + coloured
+            4. every head,  coloured
+          All black is laid down before any colour, so per arrow the shaft outline and head
+          outline merge into ONE silhouette with no seam at the junction, and no arrow's
+          outline can paint over another arrow's colour. Colour heads come last, so every head
+          still sits above every line — including other arrows' lines (e.g. with A->B and
+          B->A, neither arrow's shaft can cover the other's head).
         */}
-        <defs>
-          <filter id="glow" filterUnits="userSpaceOnUse" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.6" result="coloredBlur" />
-            <feMerge>
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
 
-          {/*
-            Outlines the combined silhouette of whatever is drawn inside the group this filter
-            is applied to (every line, or every arrowhead, drawn together as one batch), so
-            overlapping/touching pieces share one continuous ring with no internal seams.
-            feMorphology dilates the shared alpha mask; the black copy sits behind the
-            original artwork so only a thin ring around the outside remains visible.
-          */}
-          <filter id="arrowBorder" filterUnits="userSpaceOnUse" x="-50%" y="-50%" width="200%" height="200%">
-            <feMorphology in="SourceAlpha" operator="dilate" radius="1" result="dilated" />
-            <feFlood floodColor="#000000" floodOpacity="0.95" result="blackFlood" />
-            <feComposite in="blackFlood" in2="dilated" operator="in" result="blackOutline" />
-            <feMerge>
-              <feMergeNode in="blackOutline" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
+        {/* 1. shaft outlines */}
+        {paths.map(p => (
+          <path
+            key={p.key}
+            d={p.d}
+            fill="none"
+            stroke="#000"
+            strokeWidth={strokeWidthFor(p) + 2 * ARROW_BORDER}
+            strokeLinecap="round"
+            opacity={opacityFor(p)}
+          />
+        ))}
 
-        {/*
-          Rendered in two passes so every arrowhead ends up above every line, no matter which
-          arrow it belongs to. Without this, e.g. with arrows A->B and B->A, the line leaving
-          B (for B->A) would be drawn after and cover the tip of the A->B arrowhead sitting at
-          B (and symmetrically at A) — since both arrows are added/removed independently there
-          is no single per-arrow draw order that keeps a head above a *different* arrow's line.
-          Splitting into "all lines" then "all heads" guarantees it in every case.
-        */}
-        <g filter="url(#glow)">
-          <g filter="url(#arrowBorder)">
-            {paths.map(p => {
-              const isHi = isPathHighlighted(p);
+        {/* 2. arrowhead outlines */}
+        {paths.map(p => (
+          <ArrowHead
+            key={p.key}
+            x={p.head.x}
+            y={p.head.y}
+            ang={p.head.ang}
+            color="#000"
+            outlineWidth={2 * ARROW_BORDER}
+            opacity={opacityFor(p)}
+          />
+        ))}
 
-              const width = highlightActive
-                  ? (isHi ? 4.0 : 1.4)
-                  : 2.2;
+        {/* 3. coloured shafts */}
+        {paths.map(p => (
+          <path
+            key={p.key}
+            d={p.d}
+            fill="none"
+            stroke={p.color}
+            strokeWidth={strokeWidthFor(p)}
+            strokeLinecap="round"
+            opacity={opacityFor(p)}
+          />
+        ))}
 
-              const opacity = highlightActive ? (isHi ? 1 : DIM_OPACITY) : 1;
-
-              return (
-                  <path
-                    key={p.key}
-                    d={p.d}
-                    fill="none"
-                    stroke={p.color}
-                    strokeWidth={width}
-                    strokeLinecap="round"
-                    opacity={opacity}
-                  />
-              );
-            })}
-          </g>
-        </g>
-
-        <g filter="url(#glow)">
-          <g filter="url(#arrowBorder)">
-            {paths.map(p => {
-              const isHi = isPathHighlighted(p);
-              const opacity = highlightActive ? (isHi ? 1 : DIM_OPACITY) : 1;
-
-              return (
-                  <ArrowHead
-                    key={p.key}
-                    x={p.head.x}
-                    y={p.head.y}
-                    ang={p.head.ang}
-                    color={p.color}
-                    opacity={opacity}
-                  />
-              );
-            })}
-          </g>
-        </g>
+        {/* 4. coloured arrowheads */}
+        {paths.map(p => (
+          <ArrowHead
+            key={p.key}
+            x={p.head.x}
+            y={p.head.y}
+            ang={p.head.ang}
+            color={p.color}
+            opacity={opacityFor(p)}
+          />
+        ))}
       </svg>
 
       {/* Pan/zoom lives here: translating/scaling this wrapper moves the grids without
@@ -2041,11 +2058,14 @@ function DiagramCanvas(props: CanvasProps) {
 }
 
 function ArrowHead({
-  x, y, ang, color, opacity
+  x, y, ang, color, opacity, outlineWidth
 }: {
   x: number; y: number; ang: number; color: string; opacity?: number;
+  // When set, the triangle is also stroked in the same colour, growing it outward by half
+  // this width. Used to paint the black outline pass underneath the coloured head.
+  outlineWidth?: number;
 }) {
-  const size = 7;
+  const size = ARROW_HEAD_SIZE;
   const a1 = ang + Math.PI * 0.8;
   const a2 = ang - Math.PI * 0.8;
   const x1 = x + Math.cos(a1) * size;
@@ -2053,7 +2073,17 @@ function ArrowHead({
   const x2 = x + Math.cos(a2) * size;
   const y2 = y + Math.sin(a2) * size;
 
-  return <path d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`} fill={color} opacity={opacity} />;
+  return (
+    <path
+      d={`M ${x} ${y} L ${x1} ${y1} L ${x2} ${y2} Z`}
+      fill={color}
+      opacity={opacity}
+      stroke={outlineWidth ? color : undefined}
+      strokeWidth={outlineWidth}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+  );
 }
 
 function LoopColorEditor({
