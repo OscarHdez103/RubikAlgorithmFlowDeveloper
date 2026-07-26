@@ -1393,6 +1393,27 @@ function DiagramCanvas(props: CanvasProps) {
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
+  // Pan/pinch/wheel can fire far more often than the screen can repaint, and every view
+  // change cascades into a full arrow recompute — batching to at most once per animation
+  // frame keeps panning/zooming feeling smooth instead of janky, especially on mobile.
+  const pendingViewRef = useRef<{ x: number; y: number; scale: number } | null>(null);
+  const viewRafRef = useRef<number | null>(null);
+
+  function scheduleView(next: { x: number; y: number; scale: number }) {
+    pendingViewRef.current = next;
+    if (viewRafRef.current != null) return;
+    viewRafRef.current = requestAnimationFrame(() => {
+      viewRafRef.current = null;
+      if (pendingViewRef.current) setView(pendingViewRef.current);
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (viewRafRef.current != null) cancelAnimationFrame(viewRafRef.current);
+    };
+  }, []);
+
   // Dragging grids (always enabled)
   const dragRef = useRef<{
     gridId: Id;
@@ -1541,14 +1562,18 @@ function DiagramCanvas(props: CanvasProps) {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+    // Prefer a not-yet-applied scheduled view over the last-rendered state, so starting a
+    // new gesture right after another one flushes doesn't anchor off a stale position.
+    const curView = pendingViewRef.current ?? view;
+
     if (activePointers.current.size === 1) {
       pinchState.current = null;
       panState.current = {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        startViewX: view.x,
-        startViewY: view.y
+        startViewX: curView.x,
+        startViewY: curView.y
       };
     } else if (activePointers.current.size === 2) {
       panState.current = null;
@@ -1558,10 +1583,10 @@ function DiagramCanvas(props: CanvasProps) {
         const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
         const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
         pinchState.current = {
-          contentX: (midX - view.x) / view.scale,
-          contentY: (midY - view.y) / view.scale,
+          contentX: (midX - curView.x) / curView.scale,
+          contentY: (midY - curView.y) / curView.scale,
           initialDist: pointerDist(pts[0], pts[1]),
-          initialScale: view.scale
+          initialScale: curView.scale
         };
       }
     }
@@ -1586,7 +1611,7 @@ function DiagramCanvas(props: CanvasProps) {
       const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
       const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
 
-      setView({
+      scheduleView({
         x: midX - contentX * newScale,
         y: midY - contentY * newScale,
         scale: newScale
@@ -1595,7 +1620,7 @@ function DiagramCanvas(props: CanvasProps) {
       const ps = panState.current;
       const dx = e.clientX - ps.startX;
       const dy = e.clientY - ps.startY;
-      setView(v => ({ ...v, x: ps.startViewX + dx, y: ps.startViewY + dy }));
+      scheduleView({ x: ps.startViewX + dx, y: ps.startViewY + dy, scale: view.scale });
     }
   }
 
@@ -1615,7 +1640,8 @@ function DiagramCanvas(props: CanvasProps) {
       const remaining = Array.from(activePointers.current.entries());
       if (remaining.length === 1) {
         const [pointerId, pos] = remaining[0];
-        panState.current = { pointerId, startX: pos.x, startY: pos.y, startViewX: view.x, startViewY: view.y };
+        const curView = pendingViewRef.current ?? view;
+        panState.current = { pointerId, startX: pos.x, startY: pos.y, startViewX: curView.x, startViewY: curView.y };
       }
     }
   }
@@ -1628,16 +1654,18 @@ function DiagramCanvas(props: CanvasProps) {
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
 
-    setView(prev => {
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      const newScale = clamp(prev.scale * factor, MIN_VIEW_SCALE, MAX_VIEW_SCALE);
-      const contentX = (px - prev.x) / prev.scale;
-      const contentY = (py - prev.y) / prev.scale;
-      return {
-        x: px - contentX * newScale,
-        y: py - contentY * newScale,
-        scale: newScale
-      };
+    // Chain off any not-yet-applied scheduled view so rapid wheel ticks (fast scrolling,
+    // trackpads) accumulate correctly instead of all computing from the same stale state.
+    const base = pendingViewRef.current ?? view;
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    const newScale = clamp(base.scale * factor, MIN_VIEW_SCALE, MAX_VIEW_SCALE);
+    const contentX = (px - base.x) / base.scale;
+    const contentY = (py - base.y) / base.scale;
+
+    scheduleView({
+      x: px - contentX * newScale,
+      y: py - contentY * newScale,
+      scale: newScale
     });
   }
 
@@ -1735,69 +1763,97 @@ function DiagramCanvas(props: CanvasProps) {
     color: string;
     loopKey: string;
   }[]>([]);
-  useEffect(() => {
-    function recompute() {
-      const out: {
-        d: string;
-        head: { x: number; y: number; ang: number };
-        key: string;
-        i: number;
-        color: string;
-        loopKey: string;
-      }[] = [];
-      const canvasEl = document.getElementById("canvas-root");
-      if (!canvasEl) return;
-      const canvasRect = canvasEl.getBoundingClientRect();
 
-      for (const a of arrowSegments) {
-        const fromK = `${a.from.gridId}:${a.from.r}:${a.from.c}`;
-        const toK = `${a.to.gridId}:${a.to.r}:${a.to.c}`;
-        const fromEl = stickerEls.current.get(fromK);
-        const toEl = stickerEls.current.get(toK);
-        if (!fromEl || !toEl) continue;
+  function recomputePaths() {
+    const out: {
+      d: string;
+      head: { x: number; y: number; ang: number };
+      key: string;
+      i: number;
+      color: string;
+      loopKey: string;
+    }[] = [];
+    const canvasEl = document.getElementById("canvas-root");
+    if (!canvasEl) return;
+    const canvasRect = canvasEl.getBoundingClientRect();
 
-        const fr = fromEl.getBoundingClientRect();
-        const tr = toEl.getBoundingClientRect();
+    for (const a of arrowSegments) {
+      const fromK = `${a.from.gridId}:${a.from.r}:${a.from.c}`;
+      const toK = `${a.to.gridId}:${a.to.r}:${a.to.c}`;
+      const fromEl = stickerEls.current.get(fromK);
+      const toEl = stickerEls.current.get(toK);
+      if (!fromEl || !toEl) continue;
 
-        const x1 = (fr.left + fr.right) / 2 - canvasRect.left;
-        const y1 = (fr.top + fr.bottom) / 2 - canvasRect.top;
-        const x2 = (tr.left + tr.right) / 2 - canvasRect.left;
-        const y2 = (tr.top + tr.bottom) / 2 - canvasRect.top;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
 
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const len = Math.hypot(dx, dy) || 1;
-        const nx = -dy / len;
-        const ny = dx / len;
-        const offset = ((a.i % 5) - 2) * 10;
-        const cx1 = x1 + dx * 0.35 + nx * offset;
-        const cy1 = y1 + dy * 0.35 + ny * offset;
-        const cx2 = x1 + dx * 0.65 + nx * offset;
-        const cy2 = y1 + dy * 0.65 + ny * offset;
+      const x1 = (fr.left + fr.right) / 2 - canvasRect.left;
+      const y1 = (fr.top + fr.bottom) / 2 - canvasRect.top;
+      const x2 = (tr.left + tr.right) / 2 - canvasRect.left;
+      const y2 = (tr.top + tr.bottom) / 2 - canvasRect.top;
 
-        const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const offset = ((a.i % 5) - 2) * 10;
+      const cx1 = x1 + dx * 0.35 + nx * offset;
+      const cy1 = y1 + dy * 0.35 + ny * offset;
+      const cx2 = x1 + dx * 0.65 + nx * offset;
+      const cy2 = y1 + dy * 0.65 + ny * offset;
 
-        const tx = x2 - cx2;
-        const ty = y2 - cy2;
-        const ang = Math.atan2(ty, tx);
+      const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
 
-        const info = moveLoopInfo.get(a.i);
-        const color = info?.color ?? "hsl(210, 85%, 62%)";
-        const loopKey = info?.loopKey ?? "";
+      const tx = x2 - cx2;
+      const ty = y2 - cy2;
+      const ang = Math.atan2(ty, tx);
 
-        out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color, loopKey });
-      }
+      const info = moveLoopInfo.get(a.i);
+      const color = info?.color ?? "hsl(210, 85%, 62%)";
+      const loopKey = info?.loopKey ?? "";
 
-      setPaths(out);
+      out.push({ d, head: { x: x2, y: y2, ang }, key: `${fromK}->${toK}:${a.i}`, i: a.i, color, loopKey });
     }
 
-    recompute();
-    const onResize = () => recompute();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    setPaths(out);
+  }
+
+  // Keep a ref to the latest recompute closure so the mount-only effect below (resize
+  // listener + ResizeObserver) always calls the current version instead of a stale one.
+  const recomputeRef = useRef(recomputePaths);
+  recomputeRef.current = recomputePaths;
+
+  // Recompute whenever the underlying data or the view (pan/zoom) changes.
+  useEffect(() => {
+    recomputePaths();
     // view.x/y/scale: the SVG overlay stays in the stable frame while the grids pan/zoom
     // underneath it, so arrow positions must be recomputed whenever the view changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrowSegments, diagram, moveLoopInfo, view.x, view.y, view.scale]);
+
+  // Recompute on any layout change affecting canvas-root's own size. window's "resize" event
+  // only fires for the browser viewport itself — it does NOT fire when an internal layout
+  // change (like collapsing the sidebar, which resizes canvas-root via a CSS grid track
+  // animation) changes canvas-root's rendered size. Without a ResizeObserver here, arrows
+  // stay stale (pinned to the old size) after toggling the sidebar. Set up once on mount and
+  // always call the latest recompute via the ref above.
+  useEffect(() => {
+    const onResize = () => recomputeRef.current();
+    window.addEventListener("resize", onResize);
+
+    const canvasEl = document.getElementById("canvas-root");
+    let ro: ResizeObserver | null = null;
+    if (canvasEl && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => recomputeRef.current());
+      ro.observe(canvasEl);
+    }
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      ro?.disconnect();
+    };
+  }, []);
 
   // Highlighting: either a single arrow ("Show" on a move) or a whole loop ("Show" on a
   // loop) can be active at once. Non-highlighted arrows fade to near-invisible so the
@@ -1828,8 +1884,16 @@ function DiagramCanvas(props: CanvasProps) {
         actually end up on screen.
       */}
       <svg className="arrowLayer" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        {/*
+          Both filters use filterUnits="userSpaceOnUse" with the region sized off the SVG's
+          own viewport rather than the default objectBoundingBox (relative to whatever's being
+          filtered). objectBoundingBox regions can go degenerate — and some browsers respond by
+          flooding the entire filter region solid black — when the filtered group's content
+          bounding box is momentarily zero/weird, e.g. mid-way through the sidebar-collapse
+          layout transition. Sizing off the stable viewport avoids that failure mode entirely.
+        */}
         <defs>
-          <filter id="glow">
+          <filter id="glow" filterUnits="userSpaceOnUse" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="1.6" result="coloredBlur" />
             <feMerge>
               <feMergeNode in="coloredBlur" />
@@ -1844,7 +1908,7 @@ function DiagramCanvas(props: CanvasProps) {
             feMorphology dilates the shared alpha mask; the black copy sits behind the
             original artwork so only a thin ring around the outside remains visible.
           */}
-          <filter id="arrowBorder" x="-100%" y="-100%" width="300%" height="300%">
+          <filter id="arrowBorder" filterUnits="userSpaceOnUse" x="-50%" y="-50%" width="200%" height="200%">
             <feMorphology in="SourceAlpha" operator="dilate" radius="1" result="dilated" />
             <feFlood floodColor="#000000" floodOpacity="0.95" result="blackFlood" />
             <feComposite in="blackFlood" in2="dilated" operator="in" result="blackOutline" />
