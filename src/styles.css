@@ -35,14 +35,18 @@ a { color: var(--accent); }
   }
 }
 
-/* Collapsed sidebar: its grid track shrinks to nothing and the canvas takes the space. */
+/* Collapsed: the canvas takes the entire app area, on desktop and mobile alike.
+
+   The sidebar is display:none below (so it is not a grid item) and the toggle button is
+   position:fixed (so it is out of flow too), which leaves .canvasWrap as the ONLY grid item.
+   The grid therefore gets exactly ONE track, sized to fill.
+
+   Do not be tempted to keep two tracks and shrink the first to 0px: with the sidebar removed
+   from the grid, the canvas would auto-place into that first 0px track and render with zero
+   size — showing the near-black page background instead of the diagram. */
 .app.sidebarCollapsed {
-  grid-template-columns: 0px 1fr;
-}
-@media (max-width: 920px) {
-  .app.sidebarCollapsed {
-    grid-template-rows: 0px minmax(0, 1fr);
-  }
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .sidebar {
@@ -51,10 +55,10 @@ a { color: var(--accent); }
   padding: 12px;
   overflow: auto;
 }
-/* Fully remove the sidebar from rendering when collapsed rather than squashing it into a
-   0px track and relying on overflow:hidden to clip it. The sidebar is painted with a dark
-   gradient, so any browser that mis-sizes a clipped-but-still-rendered element would cover
-   the canvas with a dark panel. display:none means there is nothing to paint at all.
+/* Removed from rendering entirely when collapsed, rather than squashed into a zero-sized
+   track and clipped. The sidebar is painted with a dark gradient, so a browser that
+   mis-sizes a clipped-but-still-rendered element would drape a dark panel over the canvas.
+   display:none means there is nothing to paint and nothing to mis-size.
    React holds the menu's state in component state, not the DOM, so nothing is lost. */
 .app.sidebarCollapsed .sidebar {
   display: none;
