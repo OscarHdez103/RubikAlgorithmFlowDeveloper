@@ -16,18 +16,22 @@ button, input, select { font: inherit; }
 
 a { color: var(--accent); }
 
+/* No transition on the grid tracks. Animating a track from 330px to 0px relayouts the whole
+   app on every frame for the duration, which means the canvas and everything composited
+   inside it is torn down and re-rasterised ~12 times instead of once. That repeated
+   re-rasterisation under a shrinking viewport is what made the collapse fragile on mobile
+   (the canvas would briefly render correctly, then drop to a blank buffer). Collapsing in a
+   single layout pass is both more robust and instant. */
 .app {
   display: grid;
   grid-template-columns: 340px 1fr;
   height: 100vh;
-  transition: grid-template-columns 0.2s ease;
 }
 
 @media (max-width: 920px) {
   .app {
     grid-template-columns: 1fr;
     grid-template-rows: 330px minmax(0, 1fr);
-    transition: grid-template-rows 0.2s ease;
   }
 }
 
@@ -47,10 +51,13 @@ a { color: var(--accent); }
   padding: 12px;
   overflow: auto;
 }
+/* Fully remove the sidebar from rendering when collapsed rather than squashing it into a
+   0px track and relying on overflow:hidden to clip it. The sidebar is painted with a dark
+   gradient, so any browser that mis-sizes a clipped-but-still-rendered element would cover
+   the canvas with a dark panel. display:none means there is nothing to paint at all.
+   React holds the menu's state in component state, not the DOM, so nothing is lost. */
 .app.sidebarCollapsed .sidebar {
-  padding: 0;
-  border: none;
-  overflow: hidden;
+  display: none;
 }
 
 /* Always-visible floating control to collapse/expand the sidebar. Fixed positioning keeps
@@ -140,13 +147,6 @@ a { color: var(--accent); }
 }
 .canvas:active {
   cursor: grabbing;
-}
-
-/* Wrapper that the pan/zoom transform is applied to. Only the grids live in here — the
-   arrow overlay stays outside, in the stable canvas-root frame. */
-.canvasContent {
-  position: absolute;
-  inset: 0;
 }
 
 .grid {

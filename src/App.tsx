@@ -1991,18 +1991,34 @@ function DiagramCanvas(props: CanvasProps) {
         ))}
       </svg>
 
-      {/* Pan/zoom lives here: translating/scaling this wrapper moves the grids without
-          touching the arrow overlay above, or the grids' own local x/y coordinates. */}
-      <div
-        className="canvasContent"
-        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: "0 0" }}
-      >
+      {/*
+        Pan/zoom is applied per grid rather than through one wrapper around all of them.
+
+        There used to be a single full-size <div> here (inset:0, covering the whole canvas)
+        carrying the translate+scale transform. A transform promotes an element to its own
+        compositing layer, so that made ONE layer as large as the canvas — and up to 4x that
+        once zoomed in. Oversized composited layers are exactly what mobile GPUs fail to
+        allocate, and a layer that fails to rasterise paints as a solid black rectangle over
+        everything beneath it. Resizing the canvas (collapsing the sidebar) forces that layer
+        to be re-rasterised, which is why the failure showed up on that specific action.
+
+        Positioning each grid independently gives many small layers (a 3x3 grid is ~120px)
+        instead of one huge one, so there is no oversized buffer to fail. The arithmetic is
+        the same transform, just applied per element: a wrapper mapped content point (gx, gy)
+        to screen (view.x + gx*scale, view.y + gy*scale) and scaled the grid's own box, which
+        is precisely what left/top + scale(...) with a 0 0 origin does here.
+      */}
       {diagram.grids.map(g => (
         <div
           key={g.id}
           className="grid"
           ref={el => setGridEl(g.id, el)}
-          style={{ left: g.x, top: g.y }}
+          style={{
+            left: view.x + g.x * view.scale,
+            top: view.y + g.y * view.scale,
+            transform: `scale(${view.scale})`,
+            transformOrigin: "0 0"
+          }}
           onPointerDown={e => onGridPointerDown(e, g.id)}
         >
           <div className="gridTitle">
@@ -2052,7 +2068,6 @@ function DiagramCanvas(props: CanvasProps) {
           </div>
         </div>
       ))}
-      </div>
     </div>
   );
 }
