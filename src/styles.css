@@ -1,0 +1,248 @@
+:root {
+  --bg: #0b0d12;
+  --panel: #121726;
+  --panel2: #0f1320;
+  --text: #e8ecff;
+  --muted: #aab2d5;
+  --border: #223057;
+  --accent: #6aa8ff;
+  --danger: #ff6a7a;
+  --ok: #57ffb0;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+button, input, select { font: inherit; }
+
+a { color: var(--accent); }
+
+/* No transition on the grid tracks. Animating a track from 330px to 0px relayouts the whole
+   app on every frame for the duration, which means the canvas and everything composited
+   inside it is torn down and re-rasterised ~12 times instead of once. That repeated
+   re-rasterisation under a shrinking viewport is what made the collapse fragile on mobile
+   (the canvas would briefly render correctly, then drop to a blank buffer). Collapsing in a
+   single layout pass is both more robust and instant. */
+.app {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  height: 100vh;
+}
+
+@media (max-width: 920px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 330px minmax(0, 1fr);
+  }
+}
+
+/* Collapsed: the canvas takes the entire app area, on desktop and mobile alike.
+
+   The sidebar is display:none below (so it is not a grid item) and the toggle button is
+   position:fixed (so it is out of flow too), which leaves .canvasWrap as the ONLY grid item.
+   The grid therefore gets exactly ONE track, sized to fill.
+
+   Do not be tempted to keep two tracks and shrink the first to 0px: with the sidebar removed
+   from the grid, the canvas would auto-place into that first 0px track and render with zero
+   size — showing the near-black page background instead of the diagram. */
+.app.sidebarCollapsed {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel), var(--panel2));
+  padding: 12px;
+  overflow: auto;
+}
+/* Removed from rendering entirely when collapsed, rather than squashed into a zero-sized
+   track and clipped. The sidebar is painted with a dark gradient, so a browser that
+   mis-sizes a clipped-but-still-rendered element would drape a dark panel over the canvas.
+   display:none means there is nothing to paint and nothing to mis-size.
+   React holds the menu's state in component state, not the DOM, so nothing is lost. */
+.app.sidebarCollapsed .sidebar {
+  display: none;
+}
+
+/* Always-visible floating control to collapse/expand the sidebar. Fixed positioning keeps
+   it out of the grid layout entirely, so it never competes with canvas pan/zoom clicks. */
+.sidebarToggle {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10000;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+.sidebarToggle:hover {
+  border-color: #3a4f86;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 12px;
+}
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.spread { justify-content: space-between; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.btn {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.btn:hover { border-color: #3a4f86; }
+.btn.primary { border-color: rgba(106,168,255,0.6); box-shadow: 0 0 0 1px rgba(106,168,255,0.2) inset; }
+.btn.danger { border-color: rgba(255,106,122,0.6); }
+
+.field {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.25);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.canvasWrap {
+  position: relative;
+  min-height: 0;     /* IMPORTANT for CSS grid children on mobile */
+  height: 100%;
+  overflow: hidden;  /* keep if you don't want scrollbars */
+}
+
+.canvas {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(106,168,255,0.08), transparent 45%),
+    radial-gradient(circle at 70% 60%, rgba(87,255,176,0.06), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0));
+}
+.canvas:active {
+  cursor: grabbing;
+}
+
+.grid {
+  position: absolute;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0,0,0,0.22);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  user-select: none;
+}
+
+.gridTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stickerGrid {
+  display: grid;
+  gap: 6px;
+}
+
+.sticker {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+  position: relative;
+  cursor: pointer;
+}
+
+.sticker.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.statusOk { color: var(--ok); }
+.statusBad { color: var(--danger); }
+.small { font-size: 12px; }
+/* --- Arrow overlay (always on top) --- */
+.svgOverlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 999;        /* higher than grids */
+  pointer-events: none; /* clicks go through to stickers */
+}
+
+/* Make sure grids are below overlay */
+.grid {
+  z-index: 10;
+}
+
+.gridTitle {
+  cursor: grab;
+}
+.gridTitle:active {
+  cursor: grabbing;
+                   }
+
+/* Arrows must be above everything */
+.arrowLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  
+  width: 100%;
+  height: 100%;
+}
+
+/* Ensure grids stay below arrow layer */
+.grid {
+  position: absolute;
+  z-index: 10;
+}
+.sticker.remapFrom {
+  outline: 3px solid var(--danger);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(255,106,122,0.35);
+}
