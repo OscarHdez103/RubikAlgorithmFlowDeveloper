@@ -1290,7 +1290,8 @@ export function App() {
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".json,application/json"
+                // No `accept` filter: Android pickers often don't recognize .json
+                // as application/json and grey the file out. Content is validated on import.
                 style={{ display: "none" }}
                 onChange={doImport}
               />
