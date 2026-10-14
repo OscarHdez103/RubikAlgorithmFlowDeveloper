@@ -405,23 +405,44 @@ export function App() {
   }
 
   // Export / Import
-  const [jsonText, setJsonText] = useState("");
   const [importStatus, setImportStatus] = useState<string>("");
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   function doExport() {
-    setJsonText(exportJson(store));
-    setImportStatus("Exported current data to the text box below.");
+    const blob = new Blob([exportJson(store)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.href = url;
+    a.download = `rubik-algorithm-flow-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Delay revoke so mobile browsers have time to start the download
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setImportStatus(`✅ Exported to ${a.download}`);
   }
 
-  function doImport() {
-    const parsed = importJson(jsonText);
+  async function doImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset so selecting the same file again still triggers onChange
+    e.target.value = "";
+    if (!file) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setImportStatus("❌ Import failed: could not read file.");
+      return;
+    }
+    const parsed = importJson(text);
     if (!parsed) {
       setImportStatus("❌ Import failed: invalid JSON structure.");
       return;
     }
     setStore(parsed);
     setSelectedDiagramId(parsed.ui.lastDiagramId ?? parsed.diagrams[0].id);
-    setImportStatus("✅ Imported JSON into app storage.");
+    setImportStatus(`✅ Imported ${file.name} into app storage.`);
   }
 
   // In combine mode, show preview arrows on canvas
@@ -1264,18 +1285,18 @@ export function App() {
           <div className="row spread">
             <div style={{ fontWeight: 700 }}>Backup</div>
             <div className="row">
-              <button className="btn" onClick={doExport}>Export</button>
-              <button className="btn primary" onClick={doImport}>Import</button>
+              <button className="btn" onClick={doExport}>Export file</button>
+              <button className="btn primary" onClick={() => importInputRef.current?.click()}>Import file</button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,application/json"
+                style={{ display: "none" }}
+                onChange={doImport}
+              />
             </div>
           </div>
           <div className="muted">{importStatus}</div>
-          <textarea
-            className="field"
-            style={{ height: 160, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
-            value={jsonText}
-            onChange={e => setJsonText(e.target.value)}
-            placeholder="Export will appear here. Paste JSON here to import."
-          />
         </div>
 
         <div className="muted">
